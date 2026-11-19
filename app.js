@@ -455,6 +455,11 @@ function renderBlocks(n) {
 }
 
 function renderSingleBlock(b, isTrashed) {
+  // Автоматически распознаём голосовые записи, даже если они были сохранены как файл
+  if (b.type === "file" && (b.name?.includes("Голос") || b.name?.endsWith(".webm") || b.name?.endsWith(".m4a") || b.name?.endsWith(".mp3"))) {
+    b.type = "audio";
+  }
+
   const id = escapeHTML(b.id);
   const handleHtml = isTrashed ? "" : `<div class="af-block-handle" onclick="window.__inotesHandleClick('${id}', event)" title="Добавить блок">＋</div>`;
 
@@ -536,20 +541,27 @@ function renderSingleBlock(b, isTrashed) {
     `;
   }
 
-  // 6. Аудио / Диктофон
+  // 6. Голосовая запись (Плеер прямо внутри заметки)
   if (b.type === "audio") {
     const safeUrl = escapeHTML(b.url || "");
     const name = escapeHTML(b.name || "Голосовая запись");
+    const safePath = escapeHTML(b.path || "");
     return `
       <div class="af-block-wrapper" data-block-id="${id}">
         ${handleHtml}
         <div class="af-block-content">
-          <div class="af-file-card">
-            <span class="af-file-icon">🎙️</span>
-            <div class="af-file-info">
-              <div class="af-file-name">${name}</div>
-              <audio src="${safeUrl}" controls style="width:100%;height:32px;margin-top:6px;"></audio>
+          <div class="af-audio-card" id="card_${id}">
+            <button class="af-audio-play-btn" id="playbtn_${id}" onclick="window.__inotesPlayAudio('${id}', '${safeUrl}', '${safePath}')">▶</button>
+            <div class="af-audio-meta">
+              <div class="af-audio-title">${name}</div>
+              <div class="af-audio-track-wrap">
+                <div class="af-audio-track" onclick="window.__inotesSeekAudio('${id}', event)">
+                  <div class="af-audio-fill" id="fill_${id}"></div>
+                </div>
+                <span class="af-audio-duration" id="dur_${id}">0:00</span>
+              </div>
             </div>
+            <audio id="audio_${id}" src="${safeUrl}" preload="metadata" style="display:none"></audio>
             ${isTrashed ? "" : `<button class="af-media-del" onclick="window.__inotesRemoveBlock('${id}')" title="Удалить">✕</button>`}
           </div>
         </div>
@@ -578,6 +590,12 @@ function renderSingleBlock(b, isTrashed) {
               <div class="af-file-meta">${formatBytes(b.size)} · Документ на Яндекс Диске</div>
             </div>
             <a class="af-media-btn" href="${safeUrl}" target="_blank" download="${name}">Открыть</a>
+            ${isTrashed ? "" : `<button class="af-media-del" onclick="window.__inotesRemoveBlock('${id}')" title="Удалить">✕</button>`}
+          </div>
+        </div>
+      </div>
+    `;
+  }
             ${isTrashed ? "" : `<button class="af-media-del" onclick="window.__inotesRemoveBlock('${id}')" title="Удалить">✕</button>`}
           </div>
         </div>
@@ -614,6 +632,92 @@ function renderSingleBlock(b, isTrashed) {
 
   return "";
 }
+
+// -------------------------------------------------------------
+// Воспроизведение голосовых заметок
+// -------------------------------------------------------------
+let currentPlayingAudio = null;
+
+window.__inotesPlayAudio = async function(id, url, remotePath) {
+  const audio = $(`audio_${id}`);
+  const playBtn = $(`playbtn_${id}`);
+  const fill = $(`fill_${id}`);
+  const durEl = $(`dur_${id}`);
+  if (!audio) return;
+
+  if (currentPlayingAudio && currentPlayingAudio !== audio) {
+    currentPlayingAudio.pause();
+    currentPlayingAudio.currentTime = 0;
+    const prevId = currentPlayingAudio.id.replace("audio_", "");
+    const prevBtn = $(`playbtn_${prevId}`);
+    if (prevBtn) prevBtn.textContent = "▶";
+  }
+
+  if (!audio.paused) {
+    audio.pause();
+    playBtn.textContent = "▶";
+    return;
+  }
+
+  try {
+    audio.ontimeupdate = () => {
+      if (audio.duration && !isNaN(audio.duration)) {
+        const pct = (audio.currentTime / audio.duration) * 100;
+        fill.style.width = `${pct}%`;
+        const curM = Math.floor(audio.currentTime / 60);
+        const curS = Math.floor(audio.currentTime % 60).toString().padStart(2, "0");
+        const durM = Math.floor(audio.duration / 60);
+        const durS = Math.floor(audio.duration % 60).toString().padStart(2, "0");
+        durEl.textContent = `${curM}:${curS} / ${durM}:${durS}`;
+      }
+    };
+
+    audio.onended = () => {
+      playBtn.textContent = "▶";
+      fill.style.width = "0%";
+    };
+
+    audio.onerror = async () => {
+      if (currentToken && remotePath) {
+        const freshUrl = await YD.getFileDownloadUrl(currentToken, remotePath);
+        if (freshUrl) {
+          audio.src = freshUrl;
+          await audio.play();
+          playBtn.textContent = "❚❚";
+          currentPlayingAudio = audio;
+          return;
+        }
+      }
+      toast("Ошибка воспроизведения. Проверьте подключение к интернету.");
+      playBtn.textContent = "▶";
+    };
+
+    await audio.play();
+    currentPlayingAudio = audio;
+    playBtn.textContent = "❚❚";
+  } catch (err) {
+    console.warn("Play error, trying fresh download link:", err);
+    if (currentToken && remotePath) {
+      const freshUrl = await YD.getFileDownloadUrl(currentToken, remotePath);
+      if (freshUrl) {
+        audio.src = freshUrl;
+        await audio.play();
+        currentPlayingAudio = audio;
+        playBtn.textContent = "❚❚";
+      }
+    }
+  }
+};
+
+window.__inotesSeekAudio = function(id, event) {
+  const audio = $(`audio_${id}`);
+  const track = event.currentTarget;
+  if (!audio || !audio.duration) return;
+  const rect = track.getBoundingClientRect();
+  const clickX = event.clientX - rect.left;
+  const pct = Math.max(0, Math.min(1, clickX / rect.width));
+  audio.currentTime = pct * audio.duration;
+};
 
 // -------------------------------------------------------------
 // Операции с блоками
@@ -788,7 +892,7 @@ async function handleFilesUpload(files) {
       });
 
       // Добавляем блок прямо в текущий документ
-      const blockType = att.category === "photo" ? "image" : (att.category === "audio" ? "audio" : "file");
+      const blockType = att.category === "photo" ? "image" : (att.category === "audio" ? "audio" : (att.category === "video" ? "video" : "file"));
       n.blocks.push({
         id: uid(),
         type: blockType,

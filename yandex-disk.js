@@ -130,12 +130,19 @@ export function getFileCategory(file) {
   const name = (file.name || "").toLowerCase();
   const ext = name.split(".").pop();
 
+  // 1. Аудио и голосовые заметки
+  if (mime.startsWith("audio/") || ["mp3", "wav", "m4a", "aac", "ogg", "flac"].includes(ext) || (mime.includes("webm") && (name.includes("голос") || mime.startsWith("audio")))) {
+    return { folder: "disk:/iNotes/Другие файлы", category: "audio", label: "Голос" };
+  }
+  // 2. Фотографии и изображения
   if (mime.startsWith("image/") || ["jpg", "jpeg", "png", "gif", "webp", "heic", "svg", "bmp"].includes(ext)) {
     return { folder: "disk:/iNotes/Фотографии", category: "photo", label: "Фото" };
   }
-  if (mime.startsWith("video/") || ["mp4", "mov", "avi", "mkv", "webm", "3gp", "m4v"].includes(ext)) {
+  // 3. Видео
+  if (mime.startsWith("video/") || ["mp4", "mov", "avi", "mkv", "3gp", "m4v"].includes(ext)) {
     return { folder: "disk:/iNotes/Видео", category: "video", label: "Видео" };
   }
+  // 4. Документы
   if (mime.includes("pdf") || ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "rtf", "pages", "numbers", "key", "csv"].includes(ext)) {
     return { folder: "disk:/iNotes/PDF и документы", category: "doc", label: "Документ" };
   }
