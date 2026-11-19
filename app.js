@@ -1189,10 +1189,9 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
-if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=3").then(reg => {
-      reg.update();
-    }).catch(console.warn);
-  });
+// Очищаем старые кэши Service Worker при запуске
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.getRegistrations().then(registrations => {
+    for (let r of registrations) r.unregister();
+  }).catch(() => {});
 }
