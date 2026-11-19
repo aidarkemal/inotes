@@ -2,35 +2,41 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#f7f7f7">
-  <meta name="description" content="iNotes — современные заметки в стиле Apple Notes с Яндекс Диском">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#000000">
+  <meta name="description" content="iNotes — Apple Notes с Яндекс Диском">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icon-192.png">
   <link rel="apple-touch-icon" href="./icon-192.png">
   <link rel="stylesheet" href="./styles.css">
   <title>iNotes</title>
 </head>
-<body>
+<body class="dark">
   <div class="app-shell">
-    <!-- Боковая панель -->
+    
+    <!-- Боковое меню (Папки) -->
     <aside class="sidebar" id="sidebar">
       <header class="side-header">
-        <div class="brand"><span class="brand-icon">▤</span><span>iNotes</span></div>
+        <div class="brand"><span class="brand-icon">▤</span><span>Папки</span></div>
         <button class="icon-btn" id="themeBtn" aria-label="Сменить тему" title="Сменить тему">◐</button>
       </header>
       
-      <label class="search-wrap">
-        <span>⌕</span>
-        <input id="searchInput" placeholder="Поиск заметок и текста..." autocomplete="off">
-      </label>
-
-      <div class="section-label">ПАПКИ</div>
+      <div class="section-label">ЯНДЕКС ОБЛАКО</div>
       <nav class="folder-list" id="folderList">
-        <button class="folder active" data-folder="all"><span>▤</span><span>Все заметки</span><b id="allCount">0</b></button>
-        <button class="folder" data-folder="personal"><span>▣</span><span>Личные</span><b id="personalCount">0</b></button>
-        <button class="folder" data-folder="work"><span>▣</span><span>Работа</span><b id="workCount">0</b></button>
-        <button class="folder folder-trash" data-folder="trash"><span>🗑</span><span>Недавно удалённые</span><b id="trashCount">0</b></button>
+        <button class="folder active" data-folder="all">
+          <span class="folder-icon">📂</span><span>Все заметки</span><b id="allCount">0</b>
+        </button>
+        <button class="folder" data-folder="personal">
+          <span class="folder-icon">📁</span><span>Личные</span><b id="personalCount">0</b>
+        </button>
+        <button class="folder" data-folder="work">
+          <span class="folder-icon">📁</span><span>Работа</span><b id="workCount">0</b>
+        </button>
+        <button class="folder folder-trash" data-folder="trash">
+          <span class="folder-icon">🗑️</span><span>Недавно удалённые</span><b id="trashCount">0</b>
+        </button>
       </nav>
 
       <div class="sidebar-bottom">
@@ -38,75 +44,97 @@
           <span class="sync-dot" id="syncDot"></span>
           <div>
             <strong id="syncTitle">Только на этом устройстве</strong>
-            <small id="syncSubtitle">Войдите для синхронизации</small>
+            <small id="syncSubtitle">Нажмите для синхронизации</small>
           </div>
         </div>
         <button class="account-btn" id="accountBtn">
-          <span id="accountAvatar">☻</span>
+          <span>☻</span>
           <span id="accountLabel">Войти через Яндекс</span>
           <span class="chevron">›</span>
         </button>
       </div>
     </aside>
 
-    <!-- Основная область -->
+    <!-- Основной контейнер заметок -->
     <main class="main">
-      <header class="mobile-header">
-        <button class="icon-btn" id="menuBtn" aria-label="Папки">☰</button>
-        <strong>iNotes</strong>
-        <button class="icon-btn" id="mobileNewBtn" aria-label="Новая заметка">＋</button>
-      </header>
-
-      <!-- Список заметок -->
+      
+      <!-- Экран списка заметок (Apple Notes List View) -->
       <section class="notes-pane" id="notesPane">
-        <div class="pane-heading">
-          <div>
-            <p class="eyebrow" id="folderEyebrow">ЛИЧНОЕ ПРОСТРАНСТВО</p>
-            <h1 id="folderTitle">Все заметки</h1>
+        
+        <!-- Верхняя панель списка -->
+        <header class="ios-topbar">
+          <button class="ios-circle-btn" id="menuBtn" aria-label="Папки">
+            <span class="chevron-left">‹</span> <span class="topbar-btn-text">Папки</span>
+          </button>
+          <div class="topbar-center">
+            <h1 class="topbar-title" id="folderTitle">Все заметки</h1>
+            <span class="topbar-sub" id="notesCount">0 заметок</span>
           </div>
-          <div class="pane-heading-actions">
-            <button class="danger-btn" id="emptyTrashBtn" style="display:none">Очистить корзину</button>
-            <button class="new-note-btn" id="newNoteBtn"><span>＋</span> Новая заметка</button>
+          <button class="ios-circle-btn" id="emptyTrashBtn" style="display:none" title="Очистить корзину">
+            <span>🗑️</span>
+          </button>
+          <button class="ios-circle-btn" id="sidebarToggleBtnDesktop" aria-label="Меню">
+            <span>☰</span>
+          </button>
+        </header>
+
+        <!-- Список заметок, сгруппированный по датам (Apple Notes style) -->
+        <div class="notes-scrollable-area" id="notesScrollArea">
+          <div class="grouped-notes-container" id="notesList"></div>
+          
+          <div class="empty-state" id="emptyState">
+            <div class="empty-icon" id="emptyIcon">✎</div>
+            <h2 id="emptyTitle">Пока нет заметок</h2>
+            <p id="emptyText">Нажмите кнопку новой заметки внизу экрана.</p>
           </div>
         </div>
-        <div class="notes-toolbar">
-          <span id="notesCount">0 заметок</span>
-          <button class="sort-btn" id="sortBtn">Недавно изменённые⌄</button>
+
+        <!-- Нижняя плавающая панель списка (Apple Notes Search & Compose) -->
+        <div class="ios-floating-bottombar" id="listBottomBar">
+          <div class="search-capsule">
+            <span class="search-icon">🔍</span>
+            <input id="searchInput" placeholder="Поиск" autocomplete="off">
+          </div>
+          <button class="compose-btn" id="newNoteBtn" aria-label="Новая заметка" title="Новая заметка">
+            <span class="compose-icon">📝</span>
+          </button>
         </div>
-        <div class="notes-list" id="notesList"></div>
-        <div class="empty-state" id="emptyState">
-          <div class="empty-icon" id="emptyIcon">✎</div>
-          <h2 id="emptyTitle">Пока нет заметок</h2>
-          <p id="emptyText">Создайте первую заметку — ваши мысли, сканы и файлы будут в облаке.</p>
-          <button class="new-note-btn" id="emptyNewBtn">＋ Создать заметку</button>
-        </div>
+
       </section>
 
-      <!-- Редактор заметок -->
+      <!-- Экран редактора (Apple Notes Editor View) -->
       <section class="editor-pane" id="editorPane">
-        <div class="editor-topbar">
-          <button class="back-btn" id="backBtn">‹ <span>Заметки</span></button>
+        
+        <!-- Верхняя панель редактора -->
+        <header class="editor-ios-topbar">
+          <button class="ios-circle-btn" id="backBtn" aria-label="Назад к заметкам">
+            <span class="chevron-left">‹</span> <span class="topbar-btn-text" id="backBtnText">Заметки</span>
+          </button>
           
-          <!-- Панель действий в обычной заметке -->
-          <div class="editor-actions" id="normalActions">
-            <span class="save-state" id="saveState">Сохранено</span>
-            <button class="icon-btn" id="scanBtn" title="Сканировать документ с камеры">📷</button>
-            <button class="icon-btn" id="attachBtn" title="Прикрепить файл (до 200 МБ)">📎</button>
-            <button class="icon-btn" id="micBtn" title="Голосовая заметка (диктофон)">🎙️</button>
-            <button class="icon-btn" id="checklistBtn" title="Вставить список дел (чек-лист)">☷</button>
-            <button class="icon-btn" id="pinBtn" title="Закрепить заметку">⌑</button>
-            <button class="icon-btn danger" id="deleteBtn" title="Переместить в корзину">🗑</button>
+          <div class="editor-topbar-center">
+            <span class="save-state-badge" id="saveState">Сохранено</span>
           </div>
 
-          <!-- Панель действий для заметки в корзине -->
-          <div class="editor-actions" id="trashActions" style="display:none">
-            <span class="trash-notice">Заметка в корзине</span>
-            <button class="att-btn" id="restoreBtn">Восстановить</button>
-            <button class="att-btn danger" id="permDeleteBtn">Удалить навсегда</button>
+          <div class="editor-top-actions">
+            <!-- Меню в обычной заметке -->
+            <div id="normalActions" style="display:flex;align-items:center;gap:8px;">
+              <button class="ios-circle-btn" id="pinBtn" title="Закрепить заметку">
+                <span id="pinIcon">⌑</span>
+              </button>
+              <button class="ios-circle-btn danger" id="deleteBtn" title="Переместить в корзину">
+                <span>🗑️</span>
+              </button>
+            </div>
+            
+            <!-- Меню в корзине -->
+            <div id="trashActions" style="display:none;align-items:center;gap:8px;">
+              <button class="att-btn" id="restoreBtn">Восстановить</button>
+              <button class="att-btn danger" id="permDeleteBtn">Удалить</button>
+            </div>
           </div>
-        </div>
+        </header>
 
-        <!-- Прогресс загрузки вложений на Яндекс Диск -->
+        <!-- Индикатор прогресса загрузки файлов -->
         <div class="upload-progress-wrap" id="uploadProgressWrap" hidden>
           <div class="upload-progress-info">
             <span id="uploadFileName">Загрузка файла на Яндекс Диск...</span>
@@ -117,25 +145,45 @@
           </div>
         </div>
 
-        <!-- Содержимое заметки -->
-        <div class="editor-content" id="editorContent">
-          <input id="noteTitle" class="note-title" placeholder="Название заметки" maxlength="160">
-          <div class="note-meta" id="noteMeta">Сегодня</div>
-          <div id="noteBody" class="note-body" contenteditable="true" data-placeholder="Начните писать или перетащите сюда файлы..." spellcheck="true"></div>
-          
-          <!-- Вложенные файлы, сканы и фото -->
-          <div class="note-attachments" id="noteAttachments"></div>
+        <!-- Прокручиваемый контент заметки (Apple Notes Flow) -->
+        <div class="editor-scrollable-area" id="editorScrollArea">
+          <div class="editor-inner-content">
+            <input id="noteTitle" class="note-title" placeholder="Название заметки" maxlength="160">
+            <div class="note-date-label" id="noteMeta">19 ноября 2026 г., 23:26</div>
+            
+            <!-- Основной текст заметки -->
+            <div id="noteBody" class="note-body" contenteditable="true" data-placeholder="Начните писать..." spellcheck="true"></div>
+            
+            <!-- Вложения прямо в потоке документа -->
+            <div class="note-attachments" id="noteAttachments"></div>
+          </div>
         </div>
-        
-        <div class="editor-footer">
-          <span id="wordCount">0 слов</span>
-          <span id="attachmentSummary">0 файлов</span>
+
+        <!-- Нижняя плавающая панель редактора (Apple Notes Tools) -->
+        <div class="ios-editor-floating-bottombar" id="editorBottomBar">
+          <button class="bottom-tool-btn" id="checklistBtn" title="Список дел (чек-лист)">
+            <span>✓☷</span>
+          </button>
+          <button class="bottom-tool-btn" id="scanBtn" title="Сканировать документ с камеры">
+            <span>📷</span>
+          </button>
+          <button class="bottom-tool-btn" id="attachBtn" title="Прикрепить файл (до 200 МБ)">
+            <span>📎</span>
+          </button>
+          <button class="bottom-tool-btn" id="micBtn" title="Голосовая заметка (диктофон)">
+            <span>🎙️</span>
+          </button>
+          <button class="bottom-tool-btn" id="editorNewBtn" title="Новая заметка">
+            <span>📝</span>
+          </button>
         </div>
+
       </section>
+
     </main>
   </div>
 
-  <!-- Скрытые инпуты для файлов и камеры -->
+  <!-- Скрытые инпуты выбора файлов -->
   <input type="file" id="filePicker" multiple style="display:none">
   <input type="file" id="cameraPicker" accept="image/*" capture="environment" style="display:none">
 
@@ -151,7 +199,7 @@
         <button class="yandex-auth-btn" id="yandexLoginBtn">
           <span class="yandex-badge">Я</span> Войти с Яндекс ID
         </button>
-        <p class="tiny-note">При первом входе Яндекс подтвердит доступ к вашему Диску. В облаке будет создана папка <b>iNotes</b>.</p>
+        <p class="tiny-note">Приложение автоматически создаст папку <b>iNotes</b> на вашем Диске.</p>
       </div>
 
       <div id="authLoggedIn" hidden>
@@ -167,6 +215,12 @@
         <button class="text-btn signout-btn" id="signOutBtn">Выйти из аккаунта</button>
       </div>
     </section>
+  </div>
+
+  <!-- Лайтбокс для просмотра фото на весь экран -->
+  <div class="lightbox-backdrop" id="lightboxModal" hidden>
+    <button class="lightbox-close" id="closeLightbox">✕</button>
+    <img id="lightboxImg" src="" alt="Фото">
   </div>
 
   <div class="toast" id="toast" role="status"></div>

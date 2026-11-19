@@ -12,7 +12,6 @@ let deletedIds = new Set(JSON.parse(localStorage.getItem(DELETED_STORE) || "[]")
 let selectedId = null;
 let activeFolder = "all";
 let searchTerm = "";
-let sortNewest = true;
 let isSyncing = false;
 let syncTimer = null;
 let toastTimer = null;
@@ -46,13 +45,25 @@ function formatBytes(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
 }
 
-function dateLabel(ts) {
+// Форматирование дат в стиле Apple Notes (Сегодня, 24.02.2026 и т.д.)
+function formatNoteDate(ts) {
   const d = new Date(ts || Date.now());
   const now = new Date();
-  if (d.toDateString() === now.toDateString()) {
+  const isToday = d.toDateString() === now.toDateString();
+  if (isToday) {
     return d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
   }
-  return d.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+  const isYesterday = new Date(now.setDate(now.getDate() - 1)).toDateString() === d.toDateString();
+  if (isYesterday) {
+    return "Вчера";
+  }
+  return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+function formatDetailDate(ts) {
+  const d = new Date(ts || Date.now());
+  return d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" }) +
+    ", " + d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
 }
 
 function toast(msg) {
@@ -60,13 +71,13 @@ function toast(msg) {
   el.textContent = msg;
   el.classList.add("show");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove("show"), 2800);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 2600);
 }
 
 function persistLocally() {
   localStorage.setItem(STORE, JSON.stringify(notes));
   localStorage.setItem(DELETED_STORE, JSON.stringify([...deletedIds]));
-  render();
+  renderList();
   scheduleCloudSync();
 }
 
@@ -85,14 +96,14 @@ function setSyncStatus(state) {
     subtitle.textContent = "Обновление заметок на Диске";
   } else if (state === "online") {
     dot.className = "sync-dot online";
-    $("saveState").textContent = "Синхронизировано";
+    $("saveState").textContent = "Сохранено";
     title.textContent = "Яндекс Диск подключён";
     subtitle.textContent = currentUser ? (currentUser.default_email || currentUser.display_name) : "Облако активно";
   } else {
     dot.className = "sync-dot";
-    $("saveState").textContent = "Сохранено на устройстве";
+    $("saveState").textContent = "Локально";
     title.textContent = "Только на этом устройстве";
-    subtitle.textContent = "Войдите для синхронизации";
+    subtitle.textContent = "Нажмите для синхронизации";
   }
 }
 
@@ -106,13 +117,11 @@ async function runTwoWaySync() {
     const remoteNotes = (remoteData && remoteData.notes) ? remoteData.notes : [];
     const remoteDeleted = new Set((remoteData && remoteData.deletedIds) ? remoteData.deletedIds : []);
 
-    // 1. Учитываем удалённые навсегда заметки
     for (const id of remoteDeleted) {
       deletedIds.add(id);
     }
     notes = notes.filter(n => !deletedIds.has(n.id));
 
-    // 2. Слияние заметок
     const localMap = new Map(notes.map(n => [n.id, n]));
     const mergedMap = new Map();
 
@@ -136,14 +145,13 @@ async function runTwoWaySync() {
     localStorage.setItem(STORE, JSON.stringify(notes));
     localStorage.setItem(DELETED_STORE, JSON.stringify([...deletedIds]));
 
-    // 3. Отправляем итоговый результат на Яндекс Диск
     await YD.saveRemoteNotes(currentToken, {
       notes,
       deletedIds: [...deletedIds],
       updatedAt: Date.now()
     });
 
-    render();
+    renderList();
     if (selectedId && notes.some(n => n.id === selectedId)) {
       renderAttachments(notes.find(n => n.id === selectedId));
     }
@@ -152,7 +160,6 @@ async function runTwoWaySync() {
   } catch (err) {
     console.error("Sync error:", err);
     setSyncStatus("online");
-    $("saveState").textContent = "Ошибка сети";
   } finally {
     isSyncing = false;
   }
@@ -166,12 +173,48 @@ function scheduleCloudSync(debounceMs = 1500) {
 }
 
 // -------------------------------------------------------------
-// Рендер заметок и корзины
+// Группировка заметок по разделам Apple Notes (Screenshot 2)
 // -------------------------------------------------------------
-function render() {
+function groupNotesByDate(noteList) {
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const sevenDaysAgo = startOfToday - 7 * 86400000;
+  const thirtyDaysAgo = startOfToday - 30 * 86400000;
+
+  const groups = {
+    pinned: [],
+    today: [],
+    sevenDays: [],
+    thirtyDays: [],
+    older: []
+  };
+
+  for (const n of noteList) {
+    if (n.pinned && activeFolder !== "trash") {
+      groups.pinned.push(n);
+      continue;
+    }
+    const t = n.updated || n.trashedAt || Date.now();
+    if (t >= startOfToday) {
+      groups.today.push(n);
+    } else if (t >= sevenDaysAgo) {
+      groups.sevenDays.push(n);
+    } else if (t >= thirtyDaysAgo) {
+      groups.thirtyDays.push(n);
+    } else {
+      groups.older.push(n);
+    }
+  }
+
+  return groups;
+}
+
+// -------------------------------------------------------------
+// Рендер списка заметок (Apple Notes List View)
+// -------------------------------------------------------------
+function renderList() {
   const inTrash = activeFolder === "trash";
 
-  // Фильтрация
   const filtered = notes.filter(n => {
     if (inTrash) {
       if (!n.trashed) return false;
@@ -188,14 +231,8 @@ function render() {
     return true;
   });
 
-  filtered.sort((a, b) => {
-    if (Number(b.pinned) !== Number(a.pinned)) {
-      return Number(b.pinned) - Number(a.pinned);
-    }
-    return sortNewest ? (b.updated || 0) - (a.updated || 0) : (a.updated || 0) - (b.updated || 0);
-  });
+  filtered.sort((a, b) => (b.updated || 0) - (a.updated || 0));
 
-  // Подсчёт количества в папках
   const activeNotes = notes.filter(n => !n.trashed);
   const trashNotes = notes.filter(n => n.trashed);
 
@@ -204,62 +241,103 @@ function render() {
   $("workCount").textContent = activeNotes.filter(n => n.folder === "work").length;
   $("trashCount").textContent = trashNotes.length;
 
-  // Заголовки панели
+  // Заголовок верхней панели
   if (inTrash) {
     $("folderTitle").textContent = "Недавно удалённые";
-    $("folderEyebrow").textContent = "КОРЗИНА";
-    $("newNoteBtn").style.display = "none";
-    $("emptyTrashBtn").style.display = trashNotes.length ? "block" : "none";
+    $("emptyTrashBtn").style.display = trashNotes.length ? "flex" : "none";
+    $("backBtnText").textContent = "Корзина";
   } else {
     $("folderTitle").textContent = ({ all: "Все заметки", personal: "Личные", work: "Работа" })[activeFolder] || "Заметки";
-    $("folderEyebrow").textContent = activeFolder === "work" ? "РАБОЧЕЕ ПРОСТРАНСТВО" : "ЛИЧНОЕ ПРОСТРАНСТВО";
-    $("newNoteBtn").style.display = "block";
     $("emptyTrashBtn").style.display = "none";
+    $("backBtnText").textContent = "Заметки";
   }
 
   $("notesCount").textContent = `${filtered.length} ${filtered.length === 1 ? "заметка" : "заметок"}`;
 
-  // Рендер карточек
-  $("notesList").innerHTML = filtered.map(n => {
-    const attCount = (n.attachments || []).length;
-    const attBadge = attCount > 0 ? `<span class="att-badge" title="Вложений: ${attCount}">📎 ${attCount}</span>` : "";
-    return `
-      <button class="note-card ${n.id === selectedId ? "selected" : ""}" data-id="${escapeHTML(n.id)}">
-        <div class="card-top">
-          <span class="card-title">${escapeHTML(n.title || "Без названия")}</span>
-          ${n.pinned ? '<span class="pin-mark">⌑</span>' : ""}
-        </div>
-        <p class="card-preview">${escapeHTML(plainText(n.body) || (attCount ? `[Вложений: ${attCount}]` : "Нет текста"))}</p>
-        <div style="display:flex;align-items:center;justify-content:space-between">
-          <span class="card-date">${dateLabel(n.updated)} · ${inTrash ? "Удалено" : (n.folder === "work" ? "Работа" : "Личные")}</span>
-          ${attBadge}
-        </div>
-      </button>
-    `;
-  }).join("");
-
-  // Пустое состояние
   if (filtered.length === 0) {
+    $("notesList").innerHTML = "";
     $("emptyState").classList.add("show");
     if (inTrash) {
-      $("emptyIcon").textContent = "🗑";
+      $("emptyIcon").textContent = "🗑️";
       $("emptyTitle").textContent = "Корзина пуста";
       $("emptyText").textContent = "Удалённые заметки будут отображаться здесь.";
-      $("emptyNewBtn").style.display = "none";
     } else {
       $("emptyIcon").textContent = "✎";
       $("emptyTitle").textContent = "Пока нет заметок";
-      $("emptyText").textContent = "Создайте первую заметку — ваши мысли и файлы будут в облаке.";
-      $("emptyNewBtn").style.display = "block";
+      $("emptyText").textContent = "Нажмите значок 📝 внизу для создания первой заметки.";
     }
-  } else {
-    $("emptyState").classList.remove("show");
+    return;
   }
 
-  $("notesList").style.display = filtered.length ? "grid" : "none";
+  $("emptyState").classList.remove("show");
+
+  // Разбиваем заметки на группы в стиле Apple Notes (Screenshot 2)
+  const groups = groupNotesByDate(filtered);
+  const sectionConfigs = [
+    { key: "pinned", title: "Закреплено" },
+    { key: "today", title: "Сегодня" },
+    { key: "sevenDays", title: "Предыдущие 7 дней" },
+    { key: "thirtyDays", title: "Предыдущие 30 дней" },
+    { key: "older", title: "Ранее" }
+  ];
+
+  let html = "";
+  for (const s of sectionConfigs) {
+    const list = groups[s.key];
+    if (!list || list.length === 0) continue;
+
+    html += `
+      <div class="section-group">
+        <div class="section-header-title">${s.title}</div>
+        <div class="grouped-card">
+          ${list.map(n => renderNoteRow(n)).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  $("notesList").innerHTML = html;
   document.querySelectorAll(".folder").forEach(b => b.classList.toggle("active", b.dataset.folder === activeFolder));
 }
 
+// Рендер строки заметки (как в Screenshot 2: заголовок, дата, текст и превью справа)
+function renderNoteRow(n) {
+  const title = escapeHTML(n.title || "Без названия");
+  const dateStr = formatNoteDate(n.updated);
+  const bodySnippet = plainText(n.body) || "Нет текста";
+
+  // Проверяем наличие фото/скана для правого мини-превью
+  const firstMedia = (n.attachments || []).find(a => a.category === "photo" && a.url);
+  const thumbHtml = firstMedia
+    ? `<img class="note-item-thumb" src="${escapeHTML(firstMedia.url)}" alt="превью" loading="lazy">`
+    : "";
+
+  let snippetText = escapeHTML(bodySnippet);
+  const attCount = (n.attachments || []).length;
+  if (attCount > 0 && !bodySnippet) {
+    snippetText = `${attCount} вложенных файлов`;
+  }
+
+  const folderName = n.folder === "work" ? "Работа" : "Заметки";
+
+  return `
+    <div class="note-item-row ${n.id === selectedId ? "selected" : ""}" data-id="${escapeHTML(n.id)}">
+      <div class="note-item-left">
+        <div class="note-item-title">${title}</div>
+        <div class="note-item-subline">
+          <span class="note-item-date">${dateStr}</span>
+          <span class="note-item-snippet">${snippetText}</span>
+        </div>
+        <div class="note-item-folder">📁 ${folderName}</div>
+      </div>
+      ${thumbHtml}
+    </div>
+  `;
+}
+
+// -------------------------------------------------------------
+// Открытие заметки и отображение контента (Apple Notes Flow)
+// -------------------------------------------------------------
 function openNote(id) {
   selectedId = id;
   const n = notes.find(x => x.id === id);
@@ -267,34 +345,36 @@ function openNote(id) {
 
   $("noteTitle").value = n.title || "";
   $("noteBody").innerHTML = n.body || "";
-  $("noteMeta").textContent = `Изменено ${dateLabel(n.updated)}`;
+  $("noteMeta").textContent = formatDetailDate(n.updated);
   $("pinBtn").classList.toggle("active", !!n.pinned);
-  $("saveState").textContent = currentToken ? "Синхронизировано" : "Сохранено";
+  $("pinIcon").textContent = n.pinned ? "★" : "⌑";
 
-  // Проверка: заметка в корзине или нет
   if (n.trashed) {
     $("normalActions").style.display = "none";
     $("trashActions").style.display = "flex";
+    $("editorBottomBar").style.display = "none";
     $("noteTitle").disabled = true;
     $("noteBody").contentEditable = "false";
   } else {
     $("normalActions").style.display = "flex";
     $("trashActions").style.display = "none";
+    $("editorBottomBar").style.display = "flex";
     $("noteTitle").disabled = false;
     $("noteBody").contentEditable = "true";
   }
 
-  $("editorPane").classList.add("mobile-open");
-  document.querySelector(".mobile-header")?.classList.add("hidden");
-
-  updateWordCount();
+  // Обновляем вложения прямо в потоке документа
   renderAttachments(n);
-  render();
+
+  $("editorPane").classList.add("mobile-open");
+  renderList();
+
+  // Прокручиваем редактор наверх при открытии новой заметки
+  $("editorScrollArea").scrollTop = 0;
 }
 
 function closeEditor() {
   $("editorPane").classList.remove("mobile-open");
-  document.querySelector(".mobile-header")?.classList.remove("hidden");
 }
 
 function createNote() {
@@ -322,21 +402,11 @@ function updateSelected(patch) {
   const n = notes.find(x => x.id === selectedId);
   if (!n || n.trashed) return;
   Object.assign(n, patch, { updated: Date.now() });
-  $("noteMeta").textContent = `Изменено ${dateLabel(n.updated)}`;
-  updateWordCount();
+  $("noteMeta").textContent = formatDetailDate(n.updated);
   persistLocally();
 }
 
-function updateWordCount() {
-  const n = notes.find(x => x.id === selectedId);
-  if (!n) return;
-  const words = (plainText(n.body).match(/\S+/g) || []).length;
-  $("wordCount").textContent = `${words} слов`;
-  const atts = (n.attachments || []).length;
-  $("attachmentSummary").textContent = `${atts} ${atts === 1 ? "файл" : "файлов"}`;
-}
-
-// Перемещение в корзину (как на iPhone — мгновенно в папку «Недавно удалённые»)
+// Удаление в корзину
 function moveToTrash() {
   if (!selectedId) return;
   const n = notes.find(x => x.id === selectedId);
@@ -357,10 +427,10 @@ function moveToTrash() {
     $("noteAttachments").innerHTML = "";
     closeEditor();
   }
-  toast("Заметка перемещена в «Недавно удалённые»");
+  toast("Заметка перемещена в корзину");
 }
 
-// Восстановление из корзины
+// Восстановление
 function restoreFromTrash() {
   if (!selectedId) return;
   const n = notes.find(x => x.id === selectedId);
@@ -371,11 +441,10 @@ function restoreFromTrash() {
   n.updated = Date.now();
   persistLocally();
 
-  // Возвращаемся в папку «Все заметки» и открываем восстановленную заметку
   activeFolder = "all";
-  render();
+  renderList();
   openNote(n.id);
-  toast("Заметка восстановлена в общий список!");
+  toast("Заметка восстановлена!");
 }
 
 // Удаление навсегда
@@ -396,22 +465,17 @@ function deletePermanently() {
   selectedId = notes.find(x => x.trashed)?.id || notes[0]?.id || null;
   persistLocally();
 
-  if (selectedId) {
-    openNote(selectedId);
-  } else {
-    closeEditor();
-  }
+  if (selectedId) openNote(selectedId);
+  else closeEditor();
   toast("Заметка удалена навсегда");
 }
 
-// Очистить всю корзину
 function emptyTrash() {
   const count = notes.filter(n => n.trashed).length;
   if (!count) return;
   if (!confirm(`Очистить корзину (${count} заметок)? Все они будут удалены навсегда.`)) return;
 
-  const trashedNotes = notes.filter(n => n.trashed);
-  for (const n of trashedNotes) {
+  for (const n of notes.filter(n => n.trashed)) {
     deletedIds.add(n.id);
     if (n.attachments && currentToken) {
       for (const a of n.attachments) {
@@ -429,23 +493,35 @@ function emptyTrash() {
 }
 
 // -------------------------------------------------------------
-// Рендер и управление вложениями
+// Рендер вложений прямо в потоке документа (Screenshot 3)
 // -------------------------------------------------------------
-function renderAttachments(note) {
+async function renderAttachments(note) {
   const container = $("noteAttachments");
   if (!note || !note.attachments || note.attachments.length === 0) {
     container.innerHTML = "";
     return;
   }
 
-  container.innerHTML = `
-    <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--muted);margin-bottom:12px;">
-      ВЛОЖЕНИЯ (${note.attachments.length})
-    </div>
-    <div style="display:grid;gap:12px;">
-      ${note.attachments.map(att => renderAttachmentItem(att, !!note.trashed)).join("")}
-    </div>
-  `;
+  // Обновляем ссылки на скачивание, если они истекли
+  if (currentToken) {
+    for (const att of note.attachments) {
+      if (!att.url || (att.urlExpires && att.urlExpires < Date.now() + 60000)) {
+        YD.getFileDownloadUrl(currentToken, att.path).then(freshUrl => {
+          if (freshUrl) {
+            att.url = freshUrl;
+            att.urlExpires = Date.now() + 3 * 3600 * 1000;
+            const el = container.querySelector(`[data-att-id="${att.id}"] img, [data-att-id="${att.id}"] video, [data-att-id="${att.id}"] a`);
+            if (el) {
+              if (el.tagName === "IMG" || el.tagName === "VIDEO") el.src = freshUrl;
+              if (el.tagName === "A") el.href = freshUrl;
+            }
+          }
+        });
+      }
+    }
+  }
+
+  container.innerHTML = note.attachments.map(att => renderAttachmentItem(att, !!note.trashed)).join("");
 }
 
 function renderAttachmentItem(att, isNoteTrashed) {
@@ -453,16 +529,17 @@ function renderAttachmentItem(att, isNoteTrashed) {
   const name = escapeHTML(att.name || "Файл");
   const size = formatBytes(att.size);
   const safeUrl = escapeHTML(att.url || "#");
-  const delBtn = isNoteTrashed ? "" : `<button class="att-del" onclick="window.__inotesDeleteAtt('${id}')" title="Удалить">✕</button>`;
+  const delBtn = isNoteTrashed ? "" : `<button class="att-del" onclick="window.__inotesDeleteAtt('${id}')" title="Удалить файл">✕</button>`;
 
+  // 1. Фото / Скан (Screenshot 3 — фото во всю ширину, закруглённые углы)
   if (att.category === "photo") {
     return `
       <div class="attachment-media-card" data-att-id="${id}">
-        <img class="att-image-preview" src="${safeUrl}" alt="${name}" loading="lazy" onclick="window.open('${safeUrl}', '_blank')">
+        <img class="att-image-preview" src="${safeUrl}" alt="${name}" loading="lazy" onclick="window.__inotesOpenLightbox('${safeUrl}')">
         <div class="attachment-media-bar">
           <div>
-            <div style="font-size:12px;font-weight:600;">${name}</div>
-            <div style="font-size:10px;color:var(--muted);">${size} · Фото</div>
+            <div style="font-size:13px;font-weight:600;">${name}</div>
+            <div style="font-size:11px;color:var(--text-muted);">${size} · Фото</div>
           </div>
           <div class="att-actions">
             <a class="att-btn" href="${safeUrl}" target="_blank" download="${name}">Скачать</a>
@@ -473,14 +550,15 @@ function renderAttachmentItem(att, isNoteTrashed) {
     `;
   }
 
+  // 2. Видео
   if (att.category === "video") {
     return `
       <div class="attachment-media-card" data-att-id="${id}">
         <video class="att-video-preview" src="${safeUrl}" controls preload="metadata"></video>
         <div class="attachment-media-bar">
           <div>
-            <div style="font-size:12px;font-weight:600;">${name}</div>
-            <div style="font-size:10px;color:var(--muted);">${size} · Видео</div>
+            <div style="font-size:13px;font-weight:600;">${name}</div>
+            <div style="font-size:11px;color:var(--text-muted);">${size} · Видео</div>
           </div>
           <div class="att-actions">
             <a class="att-btn" href="${safeUrl}" target="_blank" download="${name}">Скачать</a>
@@ -491,22 +569,22 @@ function renderAttachmentItem(att, isNoteTrashed) {
     `;
   }
 
+  // 3. Аудио / Диктофон
   if (att.category === "audio") {
     return `
       <div class="attachment-card" data-att-id="${id}">
         <div class="att-icon">🎙️</div>
         <div class="att-info">
           <div class="att-name">${name}</div>
-          <audio src="${safeUrl}" controls style="width:100%;height:32px;margin-top:6px;"></audio>
+          <audio src="${safeUrl}" controls style="width:100%;height:34px;margin-top:6px;"></audio>
           <div class="att-meta">${size} · Голосовая заметка</div>
         </div>
-        <div class="att-actions">
-          ${delBtn}
-        </div>
+        <div class="att-actions">${delBtn}</div>
       </div>
     `;
   }
 
+  // 4. Документы
   let icon = "📄";
   if (name.endsWith(".pdf")) icon = "📕";
   else if (/\.(docx?|pages|txt|rtf)$/i.test(name)) icon = "📘";
@@ -518,15 +596,25 @@ function renderAttachmentItem(att, isNoteTrashed) {
       <div class="att-icon">${icon}</div>
       <div class="att-info">
         <div class="att-name" title="${name}">${name}</div>
-        <div class="att-meta">${size} · ${att.label || "Файл"}</div>
+        <div class="att-meta">${size} · ${att.label || "Документ"}</div>
       </div>
       <div class="att-actions">
-        <a class="att-btn" href="${safeUrl}" target="_blank" download="${name}">Скачать</a>
+        <a class="att-btn" href="${safeUrl}" target="_blank" download="${name}">Открыть</a>
         ${delBtn}
       </div>
     </div>
   `;
 }
+
+// Полноэкранный просмотр фото (Лайтбокс)
+window.__inotesOpenLightbox = function(url) {
+  $("lightboxImg").src = url;
+  $("lightboxModal").hidden = false;
+};
+$("closeLightbox").onclick = () => {
+  $("lightboxModal").hidden = true;
+  $("lightboxImg").src = "";
+};
 
 window.__inotesDeleteAtt = async function(attId) {
   const n = notes.find(x => x.id === selectedId);
@@ -547,12 +635,12 @@ window.__inotesDeleteAtt = async function(attId) {
 };
 
 // -------------------------------------------------------------
-// Загрузка файлов (до 200 МБ)
+// Загрузка файлов на Яндекс Диск (до 200 МБ)
 // -------------------------------------------------------------
 async function handleFilesUpload(files) {
   if (!files || files.length === 0) return;
   if (!currentToken) {
-    toast("Для сохранения файлов войдите в Яндекс ID");
+    toast("Войдите в Яндекс ID для сохранения файлов");
     $("authModal").hidden = false;
     return;
   }
@@ -569,14 +657,14 @@ async function handleFilesUpload(files) {
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
-    fileNameEl.textContent = `Загрузка: ${file.name} (${i + 1} из ${files.length})`;
+    fileNameEl.textContent = `Загрузка: ${file.name}`;
     fillEl.style.width = "0%";
     percentEl.textContent = "0%";
 
     try {
       const att = await YD.uploadAttachment(currentToken, file, (progress) => {
         fillEl.style.width = `${progress.percent}%`;
-        percentEl.textContent = `${progress.percent}% (${formatBytes(progress.loaded)} из ${formatBytes(progress.total)})`;
+        percentEl.textContent = `${progress.percent}% (${formatBytes(progress.loaded)} / ${formatBytes(progress.total)})`;
       });
       n.attachments.push(att);
       n.updated = Date.now();
@@ -593,7 +681,7 @@ async function handleFilesUpload(files) {
 }
 
 // -------------------------------------------------------------
-// Сканирование документов с камеры
+// Скан документа с камеры
 // -------------------------------------------------------------
 function scanDocumentWithCamera() {
   $("cameraPicker").click();
@@ -615,12 +703,11 @@ async function processScannedPhoto(file) {
       canvas.height = img.height;
       ctx.drawImage(img, 0, 0);
 
-      // Увеличение контрастности для четкости документа
       const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const data = imgData.data;
       for (let i = 0; i < data.length; i += 4) {
         const v = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-        const enhanced = v > 150 ? Math.min(255, v * 1.15) : Math.max(0, v * 0.85);
+        const enhanced = v > 140 ? Math.min(255, v * 1.15) : Math.max(0, v * 0.85);
         data[i] = enhanced;
         data[i + 1] = enhanced;
         data[i + 2] = enhanced;
@@ -638,7 +725,7 @@ async function processScannedPhoto(file) {
 }
 
 // -------------------------------------------------------------
-// Голосовые заметки (Диктофон)
+// Голосовые заметки
 // -------------------------------------------------------------
 async function toggleVoiceRecording() {
   const micBtn = $("micBtn");
@@ -659,9 +746,6 @@ async function toggleVoiceRecording() {
     mediaRecorder.onstop = async () => {
       clearInterval(recordTimer);
       micBtn.classList.remove("active");
-      micBtn.style.color = "";
-      micBtn.title = "Голосовая заметка";
-
       const blob = new Blob(audioChunks, { type: "audio/webm" });
       stream.getTracks().forEach(t => t.stop());
 
@@ -672,10 +756,8 @@ async function toggleVoiceRecording() {
 
     mediaRecorder.start();
     micBtn.classList.add("active");
-    micBtn.style.color = "var(--danger)";
     recordSeconds = 0;
-    micBtn.title = "Идёт запись... Нажмите для завершения";
-    toast("Идёт запись голоса… Нажмите микрофон ещё раз, чтобы остановить.");
+    toast("Идёт запись голоса… Нажмите микрофон ещё раз для остановки.");
 
     recordTimer = setInterval(() => {
       recordSeconds++;
@@ -683,8 +765,7 @@ async function toggleVoiceRecording() {
     }, 1000);
 
   } catch (err) {
-    console.warn(err);
-    alert("Для записи голоса разрешите доступ к микрофону в браузере.");
+    alert("Разрешите доступ к микрофону для записи голосовых заметок.");
   }
 }
 
@@ -725,7 +806,6 @@ async function checkAuthAndInit() {
         setSyncStatus("offline");
       }
     } catch (e) {
-      console.warn(e);
       setSyncStatus("offline");
     }
   } else {
@@ -737,12 +817,13 @@ async function checkAuthAndInit() {
 // Слушатели событий
 // -------------------------------------------------------------
 $("notesList").addEventListener("click", e => {
-  const card = e.target.closest("[data-id]");
-  if (card) openNote(card.dataset.id);
+  const row = e.target.closest(".note-item-row");
+  if (row) openNote(row.dataset.id);
 });
 
-$("newNoteBtn").onclick = $("emptyNewBtn").onclick = $("mobileNewBtn").onclick = createNote;
+$("newNoteBtn").onclick = $("editorNewBtn").onclick = createNote;
 $("backBtn").onclick = closeEditor;
+$("menuBtn").onclick = () => $("sidebar").classList.toggle("open");
 
 $("noteTitle").addEventListener("input", () => updateSelected({ title: $("noteTitle").value }));
 $("noteBody").addEventListener("input", () => updateSelected({ body: $("noteBody").innerHTML }));
@@ -752,10 +833,10 @@ $("pinBtn").onclick = () => {
   if (n) {
     updateSelected({ pinned: !n.pinned });
     $("pinBtn").classList.toggle("active", !!n.pinned);
+    $("pinIcon").textContent = n.pinned ? "★" : "⌑";
   }
 };
 
-// Корзина
 $("deleteBtn").onclick = moveToTrash;
 $("restoreBtn").onclick = restoreFromTrash;
 $("permDeleteBtn").onclick = deletePermanently;
@@ -768,14 +849,12 @@ $("checklistBtn").onclick = () => {
   updateSelected({ body: el.innerHTML });
 };
 
-// Прикрепление файлов
 $("attachBtn").onclick = () => $("filePicker").click();
 $("filePicker").onchange = e => {
   handleFilesUpload(Array.from(e.target.files));
   e.target.value = "";
 };
 
-// Скан документов
 $("scanBtn").onclick = scanDocumentWithCamera;
 $("cameraPicker").onchange = e => {
   if (e.target.files && e.target.files[0]) {
@@ -784,27 +863,19 @@ $("cameraPicker").onchange = e => {
   e.target.value = "";
 };
 
-// Голосовые заметки
 $("micBtn").onclick = toggleVoiceRecording;
 
-// Drag & drop файлов в окно заметки
+// Drag & drop
 const editorPane = $("editorPane");
-editorPane.addEventListener("dragover", e => {
-  e.preventDefault();
-  editorPane.style.borderColor = "var(--accent)";
-});
-editorPane.addEventListener("dragleave", () => {
-  editorPane.style.borderColor = "";
-});
+editorPane.addEventListener("dragover", e => { e.preventDefault(); });
 editorPane.addEventListener("drop", e => {
   e.preventDefault();
-  editorPane.style.borderColor = "";
   if (e.dataTransfer.files && e.dataTransfer.files.length) {
     handleFilesUpload(Array.from(e.dataTransfer.files));
   }
 });
 
-// Вставка из буфера обмена (Ctrl+V / Cmd+V)
+// Буфер обмена (Cmd+V / Ctrl+V)
 document.addEventListener("paste", e => {
   if (e.clipboardData && e.clipboardData.files && e.clipboardData.files.length) {
     e.preventDefault();
@@ -814,37 +885,32 @@ document.addEventListener("paste", e => {
 
 $("searchInput").oninput = e => {
   searchTerm = e.target.value;
-  render();
+  renderList();
 };
 
 $("folderList").onclick = e => {
   const b = e.target.closest("[data-folder]");
   if (!b) return;
   activeFolder = b.dataset.folder;
-  render();
-  if (innerWidth <= 650) $("sidebar").classList.remove("open");
-};
-
-$("menuBtn").onclick = () => $("sidebar").classList.toggle("open");
-
-$("sortBtn").onclick = () => {
-  sortNewest = !sortNewest;
-  $("sortBtn").textContent = sortNewest ? "Недавно изменённые⌄" : "Сначала старые⌄";
-  render();
+  renderList();
+  if (innerWidth <= 768) $("sidebar").classList.remove("open");
 };
 
 $("themeBtn").onclick = () => {
+  document.body.classList.toggle("light");
   document.body.classList.toggle("dark");
-  localStorage.setItem("inotes-dark", document.body.classList.contains("dark") ? "1" : "0");
+  const isDark = document.body.classList.contains("dark");
+  localStorage.setItem("inotes-dark", isDark ? "1" : "0");
 };
-if (localStorage.getItem("inotes-dark") === "1") document.body.classList.add("dark");
+if (localStorage.getItem("inotes-dark") === "0") {
+  document.body.classList.remove("dark");
+  document.body.classList.add("light");
+}
 
-// Модальное окно авторизации (открывается по клику на карточку или кнопку)
 $("accountBtn").onclick = $("syncCard").onclick = () => {
   $("authModal").hidden = false;
 };
 $("closeAuth").onclick = () => $("authModal").hidden = true;
-
 $("yandexLoginBtn").onclick = () => {
   window.location.href = YD.getYandexAuthUrl();
 };
@@ -869,22 +935,19 @@ $("signOutBtn").onclick = () => {
   }
 };
 
-// Приветственная заметка
 if (!notes.length) {
   notes = [{
     id: uid(),
-    title: "Добро пожаловать в iNotes! ✦",
-    body: `Ваше личное приложение для заметок в стиле Apple Notes.
+    title: "График и документы ✦",
+    body: `Добро пожаловать в iNotes!
 
-Возможности:
-• ☁️ Синхронизация через личный Яндекс Диск между Android, iPhone и MacBook.
-• 📎 Вложение любых файлов (фото, видео, PDF, Word, Excel, ZIP) размером до 200 МБ.
-• 📷 Сканирование документов с камеры смартфона с автоулучшением контраста.
-• 🎙️ Запись голосовых заметок прямо внутри заметки.
-• 🗑️ Корзина (Недавно удалённые) с возможностью восстановления.
-• ☷ Списки дел и чек-листы.
-• 📋 Вставка скриншотов из буфера обмена (Ctrl+V / Cmd+V) и перетаскивание файлов.
-• 🌓 Тёмная и светлая тема.`,
+Приложение оформлено в точности как стандартные Заметки iPhone.
+
+Попробуйте:
+• Прикрепить фотографии или документы (📎)
+• Отсканировать документ с камеры (📷)
+• Записать голосовую заметку (🎙️)
+• Добавить список задач (✓☷)`,
     folder: "personal",
     pinned: true,
     trashed: false,
@@ -896,7 +959,7 @@ if (!notes.length) {
 
 const initialNote = notes.find(n => !n.trashed);
 if (initialNote) selectedId = initialNote.id;
-render();
+renderList();
 if (selectedId) openNote(selectedId);
 
 checkAuthAndInit();
@@ -908,7 +971,6 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
-// PWA Service Worker
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("./sw.js").catch(console.warn);
