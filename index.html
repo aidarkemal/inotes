@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#f7f7f7">
-  <meta name="description" content="iNotes — заметки в стиле Apple Notes">
+  <meta name="description" content="iNotes — современные заметки в стиле Apple Notes с Яндекс Диском">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icon-192.png">
   <link rel="apple-touch-icon" href="./icon-192.png">
@@ -13,80 +13,162 @@
 </head>
 <body>
   <div class="app-shell">
+    <!-- Боковая панель -->
     <aside class="sidebar" id="sidebar">
       <header class="side-header">
         <div class="brand"><span class="brand-icon">▤</span><span>iNotes</span></div>
         <button class="icon-btn" id="themeBtn" aria-label="Сменить тему" title="Сменить тему">◐</button>
       </header>
-      <label class="search-wrap"><span>⌕</span><input id="searchInput" placeholder="Поиск" autocomplete="off"></label>
+      
+      <label class="search-wrap">
+        <span>⌕</span>
+        <input id="searchInput" placeholder="Поиск заметок и текста..." autocomplete="off">
+      </label>
+
       <div class="section-label">ПАПКИ</div>
       <nav class="folder-list" id="folderList">
         <button class="folder active" data-folder="all"><span>▤</span><span>Все заметки</span><b id="allCount">0</b></button>
         <button class="folder" data-folder="personal"><span>▣</span><span>Личные</span><b id="personalCount">0</b></button>
         <button class="folder" data-folder="work"><span>▣</span><span>Работа</span><b id="workCount">0</b></button>
+        <button class="folder folder-trash" data-folder="trash"><span>🗑</span><span>Недавно удалённые</span><b id="trashCount">0</b></button>
       </nav>
+
       <div class="sidebar-bottom">
         <div class="sync-card" id="syncCard">
-          <span class="sync-dot"></span>
-          <div><strong id="syncTitle">Только на этом устройстве</strong><small id="syncSubtitle">Включите облако для синхронизации</small></div>
+          <span class="sync-dot" id="syncDot"></span>
+          <div>
+            <strong id="syncTitle">Только на этом устройстве</strong>
+            <small id="syncSubtitle">Войдите для синхронизации</small>
+          </div>
         </div>
-        <button class="account-btn" id="accountBtn"><span>☻</span><span id="accountLabel">Войти для синхронизации</span><span class="chevron">›</span></button>
+        <button class="account-btn" id="accountBtn">
+          <span id="accountAvatar">☻</span>
+          <span id="accountLabel">Войти через Яндекс</span>
+          <span class="chevron">›</span>
+        </button>
       </div>
     </aside>
 
+    <!-- Основная область -->
     <main class="main">
       <header class="mobile-header">
         <button class="icon-btn" id="menuBtn" aria-label="Папки">☰</button>
         <strong>iNotes</strong>
         <button class="icon-btn" id="mobileNewBtn" aria-label="Новая заметка">＋</button>
       </header>
+
+      <!-- Список заметок -->
       <section class="notes-pane" id="notesPane">
         <div class="pane-heading">
-          <div><p class="eyebrow" id="folderEyebrow">ЛИЧНОЕ ПРОСТРАНСТВО</p><h1 id="folderTitle">Все заметки</h1></div>
-          <button class="new-note-btn" id="newNoteBtn"><span>＋</span> Новая заметка</button>
+          <div>
+            <p class="eyebrow" id="folderEyebrow">ЛИЧНОЕ ПРОСТРАНСТВО</p>
+            <h1 id="folderTitle">Все заметки</h1>
+          </div>
+          <div class="pane-heading-actions">
+            <button class="danger-btn" id="emptyTrashBtn" style="display:none">Очистить корзину</button>
+            <button class="new-note-btn" id="newNoteBtn"><span>＋</span> Новая заметка</button>
+          </div>
         </div>
-        <div class="notes-toolbar"><span id="notesCount">0 заметок</span><button class="sort-btn" id="sortBtn">Недавно изменённые⌄</button></div>
+        <div class="notes-toolbar">
+          <span id="notesCount">0 заметок</span>
+          <button class="sort-btn" id="sortBtn">Недавно изменённые⌄</button>
+        </div>
         <div class="notes-list" id="notesList"></div>
-        <div class="empty-state" id="emptyState"><div class="empty-icon">✎</div><h2>Пока нет заметок</h2><p>Создайте первую заметку — ваши идеи будут в одном месте.</p><button class="new-note-btn" id="emptyNewBtn">＋ Создать заметку</button></div>
+        <div class="empty-state" id="emptyState">
+          <div class="empty-icon" id="emptyIcon">✎</div>
+          <h2 id="emptyTitle">Пока нет заметок</h2>
+          <p id="emptyText">Создайте первую заметку — ваши мысли, сканы и файлы будут в облаке.</p>
+          <button class="new-note-btn" id="emptyNewBtn">＋ Создать заметку</button>
+        </div>
       </section>
 
+      <!-- Редактор заметок -->
       <section class="editor-pane" id="editorPane">
         <div class="editor-topbar">
           <button class="back-btn" id="backBtn">‹ <span>Заметки</span></button>
-          <div class="editor-actions">
+          
+          <!-- Панель действий в обычной заметке -->
+          <div class="editor-actions" id="normalActions">
             <span class="save-state" id="saveState">Сохранено</span>
-            <button class="icon-btn" id="pinBtn" title="Закрепить">⌑</button>
-            <button class="icon-btn" id="checklistBtn" title="Вставить список дел">☷</button>
-            <button class="icon-btn danger" id="deleteBtn" title="Удалить">⌫</button>
+            <button class="icon-btn" id="scanBtn" title="Сканировать документ с камеры">📷</button>
+            <button class="icon-btn" id="attachBtn" title="Прикрепить файл (до 200 МБ)">📎</button>
+            <button class="icon-btn" id="micBtn" title="Голосовая заметка (диктофон)">🎙️</button>
+            <button class="icon-btn" id="checklistBtn" title="Вставить список дел (чек-лист)">☷</button>
+            <button class="icon-btn" id="pinBtn" title="Закрепить заметку">⌑</button>
+            <button class="icon-btn danger" id="deleteBtn" title="В корзину">⌫</button>
+          </div>
+
+          <!-- Панель действий для заметки в корзине -->
+          <div class="editor-actions" id="trashActions" style="display:none">
+            <span class="trash-notice">Заметка в корзине</span>
+            <button class="att-btn" id="restoreBtn">Восстановить</button>
+            <button class="att-btn danger" id="permDeleteBtn">Удалить навсегда</button>
           </div>
         </div>
+
+        <!-- Прогресс загрузки вложений на Яндекс Диск -->
+        <div class="upload-progress-wrap" id="uploadProgressWrap" hidden>
+          <div class="upload-progress-info">
+            <span id="uploadFileName">Загрузка файла на Яндекс Диск...</span>
+            <span id="uploadPercent">0%</span>
+          </div>
+          <div class="upload-progress-bar">
+            <div class="upload-progress-fill" id="uploadProgressFill"></div>
+          </div>
+        </div>
+
+        <!-- Содержимое заметки -->
         <div class="editor-content" id="editorContent">
           <input id="noteTitle" class="note-title" placeholder="Название заметки" maxlength="160">
           <div class="note-meta" id="noteMeta">Сегодня</div>
-          <div id="noteBody" class="note-body" contenteditable="true" data-placeholder="Начните писать..." spellcheck="true"></div>
+          <div id="noteBody" class="note-body" contenteditable="true" data-placeholder="Начните писать или перетащите сюда файлы..." spellcheck="true"></div>
+          
+          <!-- Вложенные файлы, сканы и фото -->
+          <div class="note-attachments" id="noteAttachments"></div>
         </div>
-        <div class="editor-footer"><span id="wordCount">0 слов</span><span>iNotes</span></div>
+        
+        <div class="editor-footer">
+          <span id="wordCount">0 слов</span>
+          <span id="attachmentSummary">0 файлов</span>
+        </div>
       </section>
     </main>
   </div>
 
+  <!-- Скрытые инпуты для файлов и камеры -->
+  <input type="file" id="filePicker" multiple style="display:none">
+  <input type="file" id="cameraPicker" accept="image/*" capture="environment" style="display:none">
+
+  <!-- Модальное окно Яндекс ID -->
   <div class="modal-backdrop" id="authModal" hidden>
     <section class="modal">
       <button class="modal-close" id="closeAuth">×</button>
-      <div class="modal-logo">▤</div>
-      <h2 id="authHeading">Синхронизация заметок</h2>
-      <p class="modal-copy">Войдите или создайте аккаунт, чтобы видеть свои заметки на всех устройствах.</p>
-      <form id="authForm">
-        <label>Email<input type="email" id="authEmail" required placeholder="you@example.com" autocomplete="email"></label>
-        <label>Пароль<input type="password" id="authPassword" required minlength="6" placeholder="Минимум 6 символов" autocomplete="current-password"></label>
-        <p class="form-error" id="authError"></p>
-        <button class="primary-btn" type="submit" id="authSubmit">Войти</button>
-      </form>
-      <button class="text-btn" id="authModeBtn">Создать новый аккаунт</button>
-      <button class="text-btn signout-btn" id="signOutBtn" hidden>Выйти из аккаунта</button>
-      <p class="tiny-note">Для облачной синхронизации сначала настройте Firebase по инструкции в README.</p>
+      <div class="modal-logo yandex-logo">Я</div>
+      <h2 id="authHeading">Яндекс Диск</h2>
+      <p class="modal-copy" id="authSubtitle">Синхронизируйте заметки и загружайте файлы до 200 МБ в ваше личное облако.</p>
+
+      <div id="authLoggedOut">
+        <button class="yandex-auth-btn" id="yandexLoginBtn">
+          <span class="yandex-badge">Я</span> Войти с Яндекс ID
+        </button>
+        <p class="tiny-note">При первом входе Яндекс подтвердит доступ к вашему Диску. В облаке будет создана папка <b>iNotes</b>.</p>
+      </div>
+
+      <div id="authLoggedIn" hidden>
+        <div class="user-profile-card">
+          <div class="user-avatar" id="userAvatar">Я</div>
+          <div class="user-details">
+            <strong id="userName">Пользователь</strong>
+            <small id="userEmail">email@yandex.ru</small>
+            <span class="disk-usage" id="diskUsage">Диск: проверяем место...</span>
+          </div>
+        </div>
+        <button class="primary-btn sync-now-btn" id="manualSyncBtn">🔄 Синхронизировать сейчас</button>
+        <button class="text-btn signout-btn" id="signOutBtn">Выйти из аккаунта</button>
+      </div>
     </section>
   </div>
+
   <div class="toast" id="toast" role="status"></div>
   <script type="module" src="./app.js"></script>
 </body>
