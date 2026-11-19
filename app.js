@@ -4,7 +4,10 @@ const $ = id => document.getElementById(id);
 const STORE = "inotes-notes-v2";
 const DELETED_STORE = "inotes-deleted-v2";
 
-let notes = JSON.parse(localStorage.getItem(STORE) || "[]");
+let notes = JSON.parse(localStorage.getItem(STORE) || "null");
+if (!notes) {
+  notes = JSON.parse(localStorage.getItem("inotes-notes-v1") || "[]");
+}
 let deletedIds = new Set(JSON.parse(localStorage.getItem(DELETED_STORE) || "[]"));
 let selectedId = null;
 let activeFolder = "all";
@@ -333,7 +336,7 @@ function updateWordCount() {
   $("attachmentSummary").textContent = `${atts} ${atts === 1 ? "файл" : "файлов"}`;
 }
 
-// Перемещение в корзину
+// Перемещение в корзину (как на iPhone — мгновенно в папку «Недавно удалённые»)
 function moveToTrash() {
   if (!selectedId) return;
   const n = notes.find(x => x.id === selectedId);
@@ -349,9 +352,12 @@ function moveToTrash() {
   if (selectedId) {
     openNote(selectedId);
   } else {
+    $("noteTitle").value = "";
+    $("noteBody").innerHTML = "";
+    $("noteAttachments").innerHTML = "";
     closeEditor();
   }
-  toast("Заметка перемещена в корзину");
+  toast("Заметка перемещена в «Недавно удалённые»");
 }
 
 // Восстановление из корзины
@@ -364,8 +370,12 @@ function restoreFromTrash() {
   delete n.trashedAt;
   n.updated = Date.now();
   persistLocally();
+
+  // Возвращаемся в папку «Все заметки» и открываем восстановленную заметку
+  activeFolder = "all";
+  render();
   openNote(n.id);
-  toast("Заметка восстановлена!");
+  toast("Заметка восстановлена в общий список!");
 }
 
 // Удаление навсегда
@@ -829,8 +839,8 @@ $("themeBtn").onclick = () => {
 };
 if (localStorage.getItem("inotes-dark") === "1") document.body.classList.add("dark");
 
-// Модальное окно авторизации
-$("accountBtn").onclick = () => {
+// Модальное окно авторизации (открывается по клику на карточку или кнопку)
+$("accountBtn").onclick = $("syncCard").onclick = () => {
   $("authModal").hidden = false;
 };
 $("closeAuth").onclick = () => $("authModal").hidden = true;
