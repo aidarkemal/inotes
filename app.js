@@ -181,13 +181,22 @@ async function runTwoWaySync() {
 
   try {
     const remoteData = await YD.fetchRemoteNotes(currentToken);
-    const remoteNotes = (remoteData && remoteData.notes) ? remoteData.notes : [];
+    const rawRemoteNotes = (remoteData && remoteData.notes) ? remoteData.notes : [];
     const remoteDeleted = new Set((remoteData && remoteData.deletedIds) ? remoteData.deletedIds : []);
 
+    // Приводим все удалённые заметки
     for (const id of remoteDeleted) {
       deletedIds.add(id);
     }
     notes = notes.filter(n => !deletedIds.has(n.id));
+
+    // Автоматически конвертируем любые старые заметки из облака в блочную структуру AppFlowy
+    const remoteNotes = rawRemoteNotes.map(r => {
+      if (!r.blocks || !Array.isArray(r.blocks) || r.blocks.length === 0) {
+        return migrateOldNote(r);
+      }
+      return r;
+    });
 
     const localMap = new Map(notes.map(n => [n.id, n]));
     const mergedMap = new Map();
@@ -198,13 +207,23 @@ async function runTwoWaySync() {
       if (!l) {
         mergedMap.set(r.id, r);
       } else {
-        mergedMap.set(r.id, (r.updated || 0) > (l.updated || 0) ? r : l);
+        // Выбираем самую свежую версию, убедившись, что у неё есть блоки
+        const winner = (r.updated || 0) > (l.updated || 0) ? r : l;
+        if (!winner.blocks || !winner.blocks.length) {
+          mergedMap.set(r.id, migrateOldNote(winner));
+        } else {
+          mergedMap.set(r.id, winner);
+        }
       }
     }
 
     for (const [id, l] of localMap.entries()) {
       if (!mergedMap.has(id) && !deletedIds.has(id)) {
-        mergedMap.set(id, l);
+        if (!l.blocks || !l.blocks.length) {
+          mergedMap.set(id, migrateOldNote(l));
+        } else {
+          mergedMap.set(id, l);
+        }
       }
     }
 
@@ -212,6 +231,7 @@ async function runTwoWaySync() {
     localStorage.setItem(STORE, JSON.stringify(notes));
     localStorage.setItem(DELETED_STORE, JSON.stringify([...deletedIds]));
 
+    // Сохраняем обратно на Яндекс Диск уже в чистом блочном формате
     await YD.saveRemoteNotes(currentToken, {
       notes,
       deletedIds: [...deletedIds],
@@ -1171,6 +1191,8 @@ document.addEventListener("visibilitychange", () => {
 
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js").catch(console.warn);
+    navigator.serviceWorker.register("./sw.js?v=3").then(reg => {
+      reg.update();
+    }).catch(console.warn);
   });
 }
