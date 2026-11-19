@@ -45,6 +45,30 @@ function formatDetailDate(ts) {
     ", " + d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
 }
 
+// Форматирование дат в стиле Apple Notes (Сегодня, Вчера, 24.02.2026)
+function formatNoteDate(ts) {
+  const d = new Date(ts || Date.now());
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) {
+    return d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  }
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) {
+    return "Вчера";
+  }
+  return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+function formatNoteCount(count) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod100 >= 11 && mod100 <= 19) return "документов";
+  if (mod10 === 1) return "документ";
+  if (mod10 >= 2 && mod10 <= 4) return "документа";
+  return "документов";
+}
+
 function toast(msg) {
   const el = $("toast");
   el.textContent = msg;
@@ -260,8 +284,90 @@ function scheduleCloudSync(debounceMs = 1500) {
 }
 
 // -------------------------------------------------------------
-// Рендер списка документов
+// Рендер списка документов в стиле Apple Notes (Grouped cards)
 // -------------------------------------------------------------
+function groupNotesByDate(notesList) {
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startOfYesterday = startOfToday - 86400000;
+  const startOfLast7Days = startOfToday - 6 * 86400000;
+  const startOfLast30Days = startOfToday - 29 * 86400000;
+
+  const pinned = [];
+  const today = [];
+  const yesterday = [];
+  const last7 = [];
+  const last30 = [];
+  const older = [];
+
+  for (const n of notesList) {
+    if (n.pinned && activeFolder !== "trash") {
+      pinned.push(n);
+      continue;
+    }
+    const t = n.updated || Date.now();
+    if (t >= startOfToday) {
+      today.push(n);
+    } else if (t >= startOfYesterday) {
+      yesterday.push(n);
+    } else if (t >= startOfLast7Days) {
+      last7.push(n);
+    } else if (t >= startOfLast30Days) {
+      last30.push(n);
+    } else {
+      older.push(n);
+    }
+  }
+
+  const sections = [];
+  if (pinned.length) sections.push({ title: "Закреплено", notes: pinned, icon: "📌" });
+  if (today.length) sections.push({ title: "Сегодня", notes: today });
+  if (yesterday.length) sections.push({ title: "Вчера", notes: yesterday });
+  if (last7.length) sections.push({ title: "Предыдущие 7 дней", notes: last7 });
+  if (last30.length) sections.push({ title: "Предыдущие 30 дней", notes: last30 });
+  if (older.length) sections.push({ title: "Ранее", notes: older });
+
+  return sections;
+}
+
+function renderNoteRow(n) {
+  // Ищем первое фото или скан для превью справа
+  const firstImg = (n.blocks || []).find(b => (b.type === "image" || b.type === "photo") && b.url);
+  const hasAudio = (n.blocks || []).some(b => b.type === "audio");
+  const hasFile = (n.blocks || []).some(b => b.type === "file");
+
+  let thumbHtml = "";
+  if (firstImg) {
+    thumbHtml = `<img class="af-card-thumb" src="${escapeHTML(firstImg.url)}" alt="превью" loading="lazy">`;
+  } else if (hasAudio) {
+    thumbHtml = `<div class="af-card-thumb-badge" title="Аудиозапись">🎙️</div>`;
+  } else if (hasFile) {
+    thumbHtml = `<div class="af-card-thumb-badge" title="Документ">📄</div>`;
+  }
+
+  // Текстовое превью
+  const firstText = (n.blocks || []).find(b => b.type === "text" || b.type === "todo" || b.type === "h1" || b.type === "h2");
+  const preview = firstText ? escapeHTML(firstText.content || "") : "Пустая страница";
+  const folderName = n.folder === "work" ? "Работа" : "Личные";
+
+  return `
+    <div class="af-doc-card ${n.id === selectedId ? "selected" : ""}" data-id="${escapeHTML(n.id)}">
+      <span class="af-card-icon">${n.icon || "📝"}</span>
+      <div class="af-card-body">
+        <div class="af-card-title">${escapeHTML(n.title || "Без названия")}</div>
+        <div class="af-card-subline">
+          <span class="af-card-date">${formatNoteDate(n.updated)}</span>
+          <span class="af-card-preview">${preview}</span>
+        </div>
+        <div class="af-card-folder">
+          <span>📁 ${folderName}</span>
+        </div>
+      </div>
+      ${thumbHtml}
+    </div>
+  `;
+}
+
 function renderDocList() {
   const inTrash = activeFolder === "trash";
 
@@ -304,7 +410,11 @@ function renderDocList() {
     $("backBtnText").textContent = "Страницы";
   }
 
-  $("notesCount").textContent = `${filtered.length} ${filtered.length === 1 ? "документ" : "документов"}`;
+  const countStr = `${filtered.length} ${formatNoteCount(filtered.length)}`;
+  $("notesCount").textContent = countStr;
+  if ($("listBarCount")) {
+    $("listBarCount").textContent = countStr;
+  }
 
   if (filtered.length === 0) {
     $("notesList").innerHTML = "";
@@ -314,33 +424,15 @@ function renderDocList() {
 
   $("emptyState").classList.remove("show");
 
-  $("notesList").innerHTML = filtered.map(n => {
-    // Ищем первое фото для превью справа
-    const firstImg = (n.blocks || []).find(b => b.type === "image" && b.url);
-    const thumbHtml = firstImg
-      ? `<img class="af-card-thumb" src="${escapeHTML(firstImg.url)}" alt="превью" loading="lazy">`
-      : "";
-
-    // Текстовое превью
-    const firstText = (n.blocks || []).find(b => b.type === "text" || b.type === "todo" || b.type === "h1");
-    const preview = firstText ? escapeHTML(firstText.content || "") : "Пустой документ";
-
-    return `
-      <div class="af-doc-card ${n.id === selectedId ? "selected" : ""}" data-id="${escapeHTML(n.id)}">
-        <span class="af-card-icon">${n.icon || "📄"}</span>
-        <div class="af-card-body">
-          <div class="af-card-title">${escapeHTML(n.title || "Без названия")}</div>
-          <div class="af-card-preview">${preview}</div>
-          <div class="af-card-meta">
-            <span>${new Date(n.updated).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}</span>
-            <span>·</span>
-            <span>${n.folder === "work" ? "Работа" : "Личные"}</span>
-          </div>
-        </div>
-        ${thumbHtml}
+  const sections = groupNotesByDate(filtered);
+  $("notesList").innerHTML = sections.map(sec => `
+    <div class="af-group-section">
+      <div class="af-group-title">${sec.icon ? sec.icon + " " : ""}${sec.title}</div>
+      <div class="af-group-card">
+        ${sec.notes.map(n => renderNoteRow(n)).join("")}
       </div>
-    `;
-  }).join("");
+    </div>
+  `).join("");
 
   document.querySelectorAll(".af-nav-item").forEach(b => b.classList.toggle("active", b.dataset.folder === activeFolder));
 }
@@ -356,6 +448,8 @@ function openNote(id) {
   $("pageIconBtn").textContent = n.icon || "📝";
   $("noteTitle").value = n.title || "";
   $("noteMeta").textContent = formatDetailDate(n.updated);
+  $("pinIcon").textContent = n.pinned ? "★" : "☆";
+  $("pinBtn").classList.toggle("active", !!n.pinned);
 
   if (n.trashed) {
     $("normalActions").style.display = "none";
@@ -376,6 +470,7 @@ function openNote(id) {
 
 function closeEditor() {
   $("editorPane").classList.remove("mobile-open");
+  if (document.activeElement) document.activeElement.blur();
 }
 
 function createNote() {
@@ -596,12 +691,6 @@ function renderSingleBlock(b, isTrashed) {
       </div>
     `;
   }
-            ${isTrashed ? "" : `<button class="af-media-del" onclick="window.__inotesRemoveBlock('${id}')" title="Удалить">✕</button>`}
-          </div>
-        </div>
-      </div>
-    `;
-  }
 
   // 8. Callout выделение
   if (b.type === "callout") {
@@ -659,6 +748,13 @@ window.__inotesPlayAudio = async function(id, url, remotePath) {
     return;
   }
 
+  // Если ссылки нет или она не загрузилась, запрашиваем свежую с Яндекс Диска
+  if ((!audio.src || audio.src === window.location.href) && currentToken && remotePath) {
+    playBtn.textContent = "⌛";
+    const freshUrl = await YD.getFileDownloadUrl(currentToken, remotePath);
+    if (freshUrl) audio.src = freshUrl;
+  }
+
   try {
     audio.ontimeupdate = () => {
       if (audio.duration && !isNaN(audio.duration)) {
@@ -680,15 +776,17 @@ window.__inotesPlayAudio = async function(id, url, remotePath) {
     audio.onerror = async () => {
       if (currentToken && remotePath) {
         const freshUrl = await YD.getFileDownloadUrl(currentToken, remotePath);
-        if (freshUrl) {
+        if (freshUrl && freshUrl !== audio.src) {
           audio.src = freshUrl;
-          await audio.play();
-          playBtn.textContent = "❚❚";
-          currentPlayingAudio = audio;
-          return;
+          try {
+            await audio.play();
+            playBtn.textContent = "❚❚";
+            currentPlayingAudio = audio;
+            return;
+          } catch (e) {}
         }
       }
-      toast("Ошибка воспроизведения. Проверьте подключение к интернету.");
+      toast("Не удалось воспроизвести аудиозапись");
       playBtn.textContent = "▶";
     };
 
@@ -698,13 +796,21 @@ window.__inotesPlayAudio = async function(id, url, remotePath) {
   } catch (err) {
     console.warn("Play error, trying fresh download link:", err);
     if (currentToken && remotePath) {
-      const freshUrl = await YD.getFileDownloadUrl(currentToken, remotePath);
-      if (freshUrl) {
-        audio.src = freshUrl;
-        await audio.play();
-        currentPlayingAudio = audio;
-        playBtn.textContent = "❚❚";
+      try {
+        const freshUrl = await YD.getFileDownloadUrl(currentToken, remotePath);
+        if (freshUrl) {
+          audio.src = freshUrl;
+          await audio.play();
+          currentPlayingAudio = audio;
+          playBtn.textContent = "❚❚";
+        }
+      } catch (e2) {
+        toast("Ошибка воспроизведения аудио");
+        playBtn.textContent = "▶";
       }
+    } else {
+      toast("Ошибка воспроизведения аудио");
+      playBtn.textContent = "▶";
     }
   }
 };
@@ -959,7 +1065,7 @@ async function processScannedPhoto(file) {
 }
 
 // -------------------------------------------------------------
-// Голосовые заметки
+// Голосовые заметки (Универсальная поддержка iPhone и Android)
 // -------------------------------------------------------------
 async function toggleVoiceRecording() {
   const micBtn = $("micBtn");
@@ -971,7 +1077,24 @@ async function toggleVoiceRecording() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     audioChunks = [];
-    mediaRecorder = new MediaRecorder(stream);
+
+    // Определяем поддерживаемый MIME-тип для iPhone (iOS Safari) и Android (Poco)
+    let selectedMime = "";
+    if (typeof MediaRecorder !== "undefined" && typeof MediaRecorder.isTypeSupported === "function") {
+      if (MediaRecorder.isTypeSupported("audio/mp4")) {
+        selectedMime = "audio/mp4";
+      } else if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
+        selectedMime = "audio/webm;codecs=opus";
+      } else if (MediaRecorder.isTypeSupported("audio/webm")) {
+        selectedMime = "audio/webm";
+      } else if (MediaRecorder.isTypeSupported("audio/ogg")) {
+        selectedMime = "audio/ogg";
+      }
+    }
+
+    const options = selectedMime ? { mimeType: selectedMime } : {};
+    mediaRecorder = new MediaRecorder(stream, options);
+    const recordedMime = mediaRecorder.mimeType || selectedMime || "audio/mp4";
 
     mediaRecorder.ondataavailable = e => {
       if (e.data.size > 0) audioChunks.push(e.data);
@@ -980,18 +1103,20 @@ async function toggleVoiceRecording() {
     mediaRecorder.onstop = async () => {
       clearInterval(recordTimer);
       micBtn.classList.remove("active");
-      const blob = new Blob(audioChunks, { type: "audio/webm" });
+      const blob = new Blob(audioChunks, { type: recordedMime });
       stream.getTracks().forEach(t => t.stop());
 
-      if (blob.size < 1000) return;
-      const audioFile = new File([blob], `Голос_${new Date().toLocaleTimeString("ru-RU").replace(/:/g, '-')}.webm`, { type: "audio/webm" });
+      if (blob.size < 500) return;
+      const actualExt = recordedMime.includes("mp4") || recordedMime.includes("aac") ? "m4a" : (recordedMime.includes("ogg") ? "ogg" : "webm");
+      const timeStr = new Date().toLocaleTimeString("ru-RU").replace(/:/g, '-');
+      const audioFile = new File([blob], `Голос_${timeStr}.${actualExt}`, { type: recordedMime });
       await handleFilesUpload([audioFile]);
     };
 
     mediaRecorder.start();
     micBtn.classList.add("active");
     recordSeconds = 0;
-    toast("Идёт запись голоса… Нажмите микрофон ещё раз для остановки.");
+    toast("Идёт запись голоса… Нажмите микрофон ещё раз для завершения.");
 
     recordTimer = setInterval(() => {
       recordSeconds++;
@@ -1130,9 +1255,60 @@ $("notesList").addEventListener("click", e => {
   if (card) openNote(card.dataset.id);
 });
 
+function openSidebar() {
+  $("sidebar").classList.add("open");
+  if ($("sidebarBackdrop")) $("sidebarBackdrop").classList.add("show");
+}
+
+function closeSidebar() {
+  $("sidebar").classList.remove("open");
+  if ($("sidebarBackdrop")) $("sidebarBackdrop").classList.remove("show");
+}
+
 $("newNoteBtn").onclick = createNote;
+if ($("listComposeBtn")) $("listComposeBtn").onclick = createNote;
 $("backBtn").onclick = closeEditor;
-$("menuBtn").onclick = () => $("sidebar").classList.toggle("open");
+$("menuBtn").onclick = () => {
+  if ($("sidebar").classList.contains("open")) {
+    closeSidebar();
+  } else {
+    openSidebar();
+  }
+};
+if ($("sidebarBackdrop")) $("sidebarBackdrop").onclick = closeSidebar;
+
+// Поиск в списке заметок (Apple Notes style)
+if ($("listSearchInput")) {
+  $("listSearchInput").oninput = e => {
+    searchTerm = e.target.value;
+    $("searchInput").value = searchTerm;
+    if ($("listSearchClear")) $("listSearchClear").hidden = !searchTerm;
+    renderDocList();
+  };
+}
+if ($("listSearchClear")) {
+  $("listSearchClear").onclick = () => {
+    searchTerm = "";
+    if ($("listSearchInput")) $("listSearchInput").value = "";
+    $("searchInput").value = "";
+    $("listSearchClear").hidden = true;
+    renderDocList();
+  };
+}
+$("searchInput").oninput = e => {
+  searchTerm = e.target.value;
+  if ($("listSearchInput")) $("listSearchInput").value = searchTerm;
+  if ($("listSearchClear")) $("listSearchClear").hidden = !searchTerm;
+  renderDocList();
+};
+
+$("folderList").onclick = e => {
+  const b = e.target.closest("[data-folder]");
+  if (!b) return;
+  activeFolder = b.dataset.folder;
+  renderDocList();
+  closeSidebar();
+};
 
 $("noteTitle").addEventListener("input", () => updateSelected({ title: $("noteTitle").value }));
 
@@ -1154,6 +1330,7 @@ $("pinBtn").onclick = () => {
   if (n) {
     updateSelected({ pinned: !n.pinned });
     $("pinBtn").classList.toggle("active", !!n.pinned);
+    $("pinIcon").textContent = n.pinned ? "★" : "☆";
   }
 };
 
@@ -1202,19 +1379,6 @@ document.addEventListener("paste", e => {
     handleFilesUpload(Array.from(e.clipboardData.files));
   }
 });
-
-$("searchInput").oninput = e => {
-  searchTerm = e.target.value;
-  renderDocList();
-};
-
-$("folderList").onclick = e => {
-  const b = e.target.closest("[data-folder]");
-  if (!b) return;
-  activeFolder = b.dataset.folder;
-  renderDocList();
-  if (innerWidth <= 768) $("sidebar").classList.remove("open");
-};
 
 $("themeBtn").onclick = () => {
   document.body.classList.toggle("light");

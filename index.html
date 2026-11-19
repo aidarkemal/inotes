@@ -2,11 +2,11 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no,interactive-widget=resizes-content">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#121316">
-  <meta name="description" content="iNotes Flow — блочный редактор заметок в стиле AppFlowy с Яндекс Диском">
+  <meta name="description" content="iNotes Flow — блочный редактор заметок в стиле Apple Notes и AppFlowy с Яндекс Диском">
   <script>
     // Принудительный сброс старого Service Worker и кэша браузера
     if ('serviceWorker' in navigator) {
@@ -23,7 +23,7 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icon-192.png">
   <link rel="apple-touch-icon" href="./icon-192.png">
-  <link rel="stylesheet" href="./styles.css?v=3">
+  <link rel="stylesheet" href="./styles.css?v=4">
   <title>iNotes Flow</title>
 </head>
 <body class="dark">
@@ -82,6 +82,9 @@
       </div>
     </aside>
 
+    <!-- Затемнение фона при открытии бокового меню на смартфонах -->
+    <div class="af-sidebar-backdrop" id="sidebarBackdrop"></div>
+
     <!-- Основная рабочая область -->
     <main class="af-main">
       
@@ -97,6 +100,15 @@
           <button class="af-btn-danger" id="emptyTrashBtn" style="display:none">Очистить корзину</button>
         </header>
 
+        <!-- Быстрый поиск в списке заметок (Apple Notes style) -->
+        <div class="af-list-search-wrap">
+          <div class="af-list-search-box">
+            <span class="af-search-icon">🔍</span>
+            <input id="listSearchInput" placeholder="Поиск заметок..." autocomplete="off">
+            <button class="af-search-clear" id="listSearchClear" hidden>×</button>
+          </div>
+        </div>
+
         <!-- Прокручиваемый список карточек -->
         <div class="af-list-scrollable" id="notesScrollArea">
           <div class="af-cards-container" id="notesList"></div>
@@ -106,6 +118,14 @@
             <h2 id="emptyTitle">Нет документов</h2>
             <p id="emptyText">Создайте первую страницу с помощью кнопки выше.</p>
           </div>
+        </div>
+
+        <!-- Нижняя плавающая панель списка заметок (Apple Notes mobile) -->
+        <div class="af-list-floating-bar" id="listBottomBar">
+          <span class="af-list-bar-count" id="listBarCount">0 заметок</span>
+          <button class="af-compose-pill-btn" id="listComposeBtn" title="Создать заметку">
+            <span>📝 Новая</span>
+          </button>
         </div>
       </section>
 
@@ -282,6 +302,6 @@
   </div>
 
   <div class="toast" id="toast" role="status"></div>
-  <script type="module" src="./app.js?v=3"></script>
+  <script type="module" src="./app.js?v=4"></script>
 </body>
 </html>
