@@ -23,7 +23,7 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icon-192.png">
   <link rel="apple-touch-icon" href="./icon-192.png">
-  <link rel="stylesheet" href="./styles.css?v=4">
+  <link rel="stylesheet" href="./styles.css?v=5">
   <title>iNotes Flow</title>
 </head>
 <body class="dark">
@@ -295,13 +295,34 @@
     </section>
   </div>
 
-  <!-- Лайтбокс фото во весь экран -->
-  <div class="lightbox-backdrop" id="lightboxModal" hidden>
-    <button class="lightbox-close" id="closeLightbox">✕</button>
-    <img id="lightboxImg" src="" alt="Фото">
+  <!-- Универсальный просмотрщик файлов и документов прямо в приложении (In-App File Viewer) -->
+  <div class="af-viewer-backdrop" id="fileViewerModal" hidden>
+    <div class="af-viewer-card" id="viewerCard">
+      <header class="af-viewer-header">
+        <div class="af-viewer-info">
+          <span class="af-viewer-icon" id="viewerIcon">📄</span>
+          <div class="af-viewer-text">
+            <strong id="viewerTitle">Документ</strong>
+            <small id="viewerMeta">Загрузка...</small>
+          </div>
+        </div>
+        <div class="af-viewer-actions">
+          <button class="af-viewer-action-btn" id="viewerDownloadBtn" title="Скачать файл">
+            <span>📥 Скачать</span>
+          </button>
+          <button class="af-viewer-action-btn close" id="closeViewerBtn" title="Закрыть">
+            <span>✕</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="af-viewer-content" id="viewerContent">
+        <!-- Интерактивный просмотр файла прямо в заметке -->
+      </div>
+    </div>
   </div>
 
   <div class="toast" id="toast" role="status"></div>
-  <script type="module" src="./app.js?v=4"></script>
+  <script type="module" src="./app.js?v=5"></script>
 </body>
 </html>

@@ -743,23 +743,52 @@ button { cursor: pointer; color: inherit; border: 0; background: transparent; }
 .af-file-card {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 12px 14px;
+  border-radius: 14px;
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
 }
-.af-file-icon { font-size: 26px; flex-shrink: 0; }
+.af-file-card:hover {
+  background: var(--bg-card-hover);
+  border-color: rgba(255, 255, 255, 0.18);
+  transform: translateY(-1px);
+}
+.af-file-card:active {
+  transform: scale(0.99);
+}
+.af-file-icon { font-size: 28px; flex-shrink: 0; }
 .af-file-info { flex: 1; min-width: 0; }
 .af-file-name {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--text-main);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  margin-bottom: 2px;
 }
-.af-file-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.af-file-meta { font-size: 12px; color: var(--text-muted); }
+
+/* Видео блок прямо в заметке */
+.af-video-block {
+  margin: 10px 0;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+.af-video-player {
+  width: 100%;
+  max-height: 480px;
+  display: block;
+  background: #000;
+  border-radius: 14px 14px 0 0;
+}
 
 /* Блок голосовой заметки (Apple Voice Memo Player) */
 .af-audio-card {
@@ -1078,29 +1107,192 @@ button { cursor: pointer; color: inherit; border: 0; background: transparent; }
   margin-top: 8px;
 }
 
-/* Лайтбокс */
-.lightbox-backdrop {
+/* -------------------------------------------------------------
+   Встроенный просмотрщик файлов прямо в заметках (In-App Viewer)
+------------------------------------------------------------- */
+.af-viewer-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.95);
+  background: rgba(0, 0, 0, 0.88);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+.af-viewer-backdrop:not([hidden]) {
+  opacity: 1;
+  pointer-events: auto;
+}
+.af-viewer-backdrop[hidden] {
+  display: none;
+}
+.af-viewer-card {
+  width: min(920px, 96vw);
+  height: min(88vh, 860px);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.75);
+}
+.af-viewer-header {
+  min-height: 58px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-sidebar);
+  flex-shrink: 0;
+}
+.af-viewer-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.af-viewer-icon {
+  font-size: 26px;
+  flex-shrink: 0;
+}
+.af-viewer-text {
+  min-width: 0;
+}
+.af-viewer-text strong {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: min(450px, 50vw);
+}
+.af-viewer-text small {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.af-viewer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.af-viewer-action-btn {
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+  font-size: 13px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.12s;
+  min-height: 38px;
+}
+.af-viewer-action-btn:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.af-viewer-action-btn.close {
+  font-size: 18px;
+  width: 38px;
+  height: 38px;
+  padding: 0;
   display: grid;
   place-items: center;
-  padding: 16px;
-  z-index: 100;
+  border-radius: 50%;
 }
-.lightbox-backdrop[hidden] { display: none; }
-.lightbox-backdrop img {
-  max-width: 95vw;
-  max-height: 90vh;
+.af-viewer-action-btn.close:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.af-viewer-content {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  position: relative;
+  background: rgba(0, 0, 0, 0.4);
+}
+.af-viewer-loading {
+  font-size: 14px;
+  color: var(--text-muted);
+}
+.af-viewer-iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+.af-viewer-img {
+  max-width: 100%;
+  max-height: 100%;
   object-fit: contain;
+}
+.af-viewer-video {
+  max-width: 100%;
+  max-height: 100%;
   border-radius: 8px;
 }
-.lightbox-close {
-  position: absolute;
-  top: 20px;
-  right: 20px;
-  font-size: 28px;
+.af-viewer-text-content {
+  width: 100%;
+  height: 100%;
+  padding: 24px;
+  margin: 0;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-main);
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: var(--bg-card);
+}
+.af-viewer-fallback-card {
+  text-align: center;
+  padding: 40px 20px;
+  max-width: 440px;
+}
+.af-viewer-fallback-icon {
+  font-size: 56px;
+  margin-bottom: 14px;
+}
+.af-viewer-fallback-title {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: var(--text-main);
+  word-break: break-all;
+}
+.af-viewer-fallback-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-bottom: 24px;
+}
+.af-viewer-download-cta {
+  padding: 12px 24px;
+  background: var(--accent);
   color: #fff;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 14px rgba(108, 92, 231, 0.4);
 }
 
 /* Toast */
@@ -1223,5 +1415,20 @@ button { cursor: pointer; color: inherit; border: 0; background: transparent; }
     width: 40px;
     height: 40px;
     font-size: 18px;
+  }
+
+  .af-viewer-backdrop {
+    padding: 0;
+  }
+  .af-viewer-card {
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    border-radius: 0;
+    border: 0;
+  }
+  .af-viewer-header {
+    padding-top: max(10px, var(--sat));
+    min-height: calc(56px + max(10px, var(--sat)));
   }
 }

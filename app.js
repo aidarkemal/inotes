@@ -619,14 +619,15 @@ function renderSingleBlock(b, isTrashed) {
         ${handleHtml}
         <div class="af-block-content">
           <div class="af-image-block">
-            <img class="af-image-preview" src="${safeUrl}" alt="${name}" loading="lazy" onclick="window.__inotesOpenLightbox('${safeUrl}')">
+            <img class="af-image-preview" src="${safeUrl}" alt="${name}" loading="lazy" onclick="window.__inotesOpenFileViewer('${id}')">
             <div class="af-media-footer">
               <div>
                 <span class="af-media-title">${name}</span>
                 <span class="af-media-sub"> · ${formatBytes(b.size)}</span>
               </div>
               <div class="af-media-actions">
-                <a class="af-media-btn" href="${safeUrl}" target="_blank" download="${name}">Скачать</a>
+                <button class="af-media-btn" onclick="window.__inotesOpenFileViewer('${id}')">Просмотреть</button>
+                <button class="af-media-btn" onclick="window.__inotesDownloadBlockFile('${id}', event)" title="Скачать">📥</button>
                 ${isTrashed ? "" : `<button class="af-media-del" onclick="window.__inotesRemoveBlock('${id}')" title="Удалить блок">✕</button>`}
               </div>
             </div>
@@ -636,7 +637,34 @@ function renderSingleBlock(b, isTrashed) {
     `;
   }
 
-  // 6. Голосовая запись (Плеер прямо внутри заметки)
+  // 6. Видеозапись (Плеер прямо внутри заметки)
+  if (b.type === "video") {
+    const safeUrl = escapeHTML(b.url || "");
+    const name = escapeHTML(b.name || "Видео");
+    return `
+      <div class="af-block-wrapper" data-block-id="${id}">
+        ${handleHtml}
+        <div class="af-block-content">
+          <div class="af-video-block">
+            <video class="af-video-player" src="${safeUrl}" controls playsinline preload="metadata"></video>
+            <div class="af-media-footer">
+              <div>
+                <span class="af-media-title">🎬 ${name}</span>
+                <span class="af-media-sub"> · ${formatBytes(b.size)}</span>
+              </div>
+              <div class="af-media-actions">
+                <button class="af-media-btn" onclick="window.__inotesOpenFileViewer('${id}')">Во весь экран</button>
+                <button class="af-media-btn" onclick="window.__inotesDownloadBlockFile('${id}', event)" title="Скачать">📥</button>
+                ${isTrashed ? "" : `<button class="af-media-del" onclick="window.__inotesRemoveBlock('${id}')" title="Удалить блок">✕</button>`}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // 7. Голосовая запись (Плеер прямо внутри заметки)
   if (b.type === "audio") {
     const safeUrl = escapeHTML(b.url || "");
     const name = escapeHTML(b.name || "Голосовая запись");
@@ -657,6 +685,7 @@ function renderSingleBlock(b, isTrashed) {
               </div>
             </div>
             <audio id="audio_${id}" src="${safeUrl}" preload="metadata" style="display:none"></audio>
+            <button class="af-media-btn" onclick="window.__inotesDownloadBlockFile('${id}', event)" title="Скачать">📥</button>
             ${isTrashed ? "" : `<button class="af-media-del" onclick="window.__inotesRemoveBlock('${id}')" title="Удалить">✕</button>`}
           </div>
         </div>
@@ -664,7 +693,7 @@ function renderSingleBlock(b, isTrashed) {
     `;
   }
 
-  // 7. Файл / Документ (PDF, Word, Excel, ZIP)
+  // 8. Файл / Документ (PDF, Word, Excel, ZIP)
   if (b.type === "file") {
     const safeUrl = escapeHTML(b.url || "");
     const name = escapeHTML(b.name || "Файл");
@@ -678,14 +707,17 @@ function renderSingleBlock(b, isTrashed) {
       <div class="af-block-wrapper" data-block-id="${id}">
         ${handleHtml}
         <div class="af-block-content">
-          <div class="af-file-card">
+          <div class="af-file-card" onclick="window.__inotesOpenFileViewer('${id}')">
             <span class="af-file-icon">${icon}</span>
             <div class="af-file-info">
               <div class="af-file-name">${name}</div>
-              <div class="af-file-meta">${formatBytes(b.size)} · Документ на Яндекс Диске</div>
+              <div class="af-file-meta">${formatBytes(b.size)} · Нажмите для просмотра</div>
             </div>
-            <a class="af-media-btn" href="${safeUrl}" target="_blank" download="${name}">Открыть</a>
-            ${isTrashed ? "" : `<button class="af-media-del" onclick="window.__inotesRemoveBlock('${id}')" title="Удалить">✕</button>`}
+            <div class="af-media-actions" onclick="event.stopPropagation()">
+              <button class="af-media-btn" onclick="window.__inotesOpenFileViewer('${id}')">Просмотреть</button>
+              <button class="af-media-btn" onclick="window.__inotesDownloadBlockFile('${id}', event)" title="Скачать на устройство">📥</button>
+              ${isTrashed ? "" : `<button class="af-media-del" onclick="window.__inotesRemoveBlock('${id}')" title="Удалить">✕</button>`}
+            </div>
           </div>
         </div>
       </div>
@@ -1128,14 +1160,182 @@ async function toggleVoiceRecording() {
   }
 }
 
-// Полноэкранный просмотр фото (Лайтбокс)
-window.__inotesOpenLightbox = function(url) {
-  $("lightboxImg").src = url;
-  $("lightboxModal").hidden = false;
+// -------------------------------------------------------------
+// Встроенный просмотрщик файлов и документов прямо в приложении (In-App File Viewer)
+// -------------------------------------------------------------
+let currentViewerBlock = null;
+
+window.__inotesOpenFileViewer = async function(blockId) {
+  const n = notes.find(x => x.id === selectedId);
+  if (!n) return;
+  const b = (n.blocks || []).find(x => x.id === blockId);
+  if (!b) return;
+
+  currentViewerBlock = b;
+
+  const modal = $("fileViewerModal");
+  const titleEl = $("viewerTitle");
+  const metaEl = $("viewerMeta");
+  const iconEl = $("viewerIcon");
+  const contentEl = $("viewerContent");
+
+  titleEl.textContent = b.name || "Документ";
+  metaEl.textContent = `${formatBytes(b.size)} · ${b.path ? "Сохранено в Яндекс Диске" : "Локальный файл"}`;
+
+  $("viewerDownloadBtn").onclick = () => window.__inotesDownloadFile(b.url, b.path, b.name);
+
+  modal.hidden = false;
+  contentEl.innerHTML = `<div class="af-viewer-loading">Загрузка содержимого...</div>`;
+
+  let fileUrl = b.url || "";
+  if (currentToken && b.path) {
+    try {
+      const fresh = await YD.getFileDownloadUrl(currentToken, b.path);
+      if (fresh) {
+        fileUrl = fresh;
+        b.url = fresh;
+      }
+    } catch (e) {
+      console.warn("Could not refresh download url", e);
+    }
+  }
+
+  const name = (b.name || "").toLowerCase();
+  const ext = name.split(".").pop();
+
+  // 1. Изображение / Скан
+  if (b.type === "image" || b.type === "photo" || ["jpg", "jpeg", "png", "gif", "webp", "heic", "svg", "bmp"].includes(ext)) {
+    iconEl.textContent = "🖼️";
+    contentEl.innerHTML = `<img class="af-viewer-img" src="${escapeHTML(fileUrl)}" alt="${escapeHTML(b.name || '')}">`;
+    return;
+  }
+
+  // 2. Видео файл
+  if (b.type === "video" || ["mp4", "mov", "webm", "mkv", "avi", "3gp", "m4v"].includes(ext)) {
+    iconEl.textContent = "🎬";
+    contentEl.innerHTML = `<video class="af-viewer-video" src="${escapeHTML(fileUrl)}" controls autoplay playsinline></video>`;
+    return;
+  }
+
+  // 3. PDF документ
+  if (ext === "pdf" || (b.name && b.name.endsWith(".pdf"))) {
+    iconEl.textContent = "📕";
+    contentEl.innerHTML = `<iframe class="af-viewer-iframe" src="${escapeHTML(fileUrl)}" title="${escapeHTML(b.name || 'PDF')}"></iframe>`;
+    return;
+  }
+
+  // 4. Текстовые файлы и код (txt, md, json, csv, log, js, css, html, py)
+  if (["txt", "md", "json", "csv", "log", "js", "ts", "css", "html", "py", "sh", "xml", "yml", "yaml"].includes(ext)) {
+    iconEl.textContent = "📝";
+    try {
+      const res = await fetch(fileUrl);
+      if (res.ok) {
+        const text = await res.text();
+        contentEl.innerHTML = `<pre class="af-viewer-text-content"><code>${escapeHTML(text)}</code></pre>`;
+        return;
+      }
+    } catch (e) {
+      console.warn("Failed to fetch text", e);
+    }
+  }
+
+  // 5. Офисные документы (Word, Excel, PowerPoint) или архивы (ZIP, RAR)
+  let docIcon = "📄";
+  if (["doc", "docx", "rtf", "pages"].includes(ext)) docIcon = "📘";
+  else if (["xls", "xlsx", "numbers", "csv"].includes(ext)) docIcon = "📗";
+  else if (["ppt", "pptx", "key"].includes(ext)) docIcon = "📙";
+  else if (["zip", "rar", "7z", "tar", "gz"].includes(ext)) docIcon = "📦";
+
+  iconEl.textContent = docIcon;
+  contentEl.innerHTML = `
+    <div class="af-viewer-fallback-card">
+      <div class="af-viewer-fallback-icon">${docIcon}</div>
+      <div class="af-viewer-fallback-title">${escapeHTML(b.name || "Документ")}</div>
+      <div class="af-viewer-fallback-desc">
+        Файл сохранён в вашем личном Яндекс Диске (${formatBytes(b.size)}).
+        Вы можете сохранить его на устройство прямо сейчас без перехода на сторонние вкладки.
+      </div>
+      <button class="af-viewer-download-cta" onclick="window.__inotesDownloadFile('${escapeHTML(fileUrl)}', '${escapeHTML(b.path || '')}', '${escapeHTML(b.name || 'файл')}')">
+        <span>📥 Сохранить на устройство</span>
+      </button>
+    </div>
+  `;
 };
-$("closeLightbox").onclick = () => {
-  $("lightboxModal").hidden = true;
-  $("lightboxImg").src = "";
+
+window.__inotesDownloadBlockFile = function(blockId, event) {
+  if (event) event.stopPropagation();
+  const n = notes.find(x => x.id === selectedId);
+  if (!n) return;
+  const b = (n.blocks || []).find(x => x.id === blockId);
+  if (!b) return;
+  window.__inotesDownloadFile(b.url, b.path, b.name);
+};
+
+window.__inotesDownloadFile = async function(url, remotePath, filename) {
+  toast("Подготовка файла…");
+  let targetUrl = url;
+  if (currentToken && remotePath) {
+    try {
+      const fresh = await YD.getFileDownloadUrl(currentToken, remotePath);
+      if (fresh) targetUrl = fresh;
+    } catch (e) {}
+  }
+
+  try {
+    const res = await fetch(targetUrl);
+    if (!res.ok) throw new Error("Сетевая ошибка");
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = filename || "файл";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+    toast("Файл успешно скачан!");
+  } catch (err) {
+    const iframe = document.createElement("iframe");
+    iframe.style.display = "none";
+    iframe.src = targetUrl;
+    document.body.appendChild(iframe);
+    setTimeout(() => document.body.removeChild(iframe), 6000);
+    toast("Загрузка файла началась");
+  }
+};
+
+function closeFileViewer() {
+  $("fileViewerModal").hidden = true;
+  $("viewerContent").innerHTML = "";
+  currentViewerBlock = null;
+}
+
+$("closeViewerBtn").onclick = closeFileViewer;
+$("fileViewerModal").onclick = e => {
+  if (e.target === $("fileViewerModal")) closeFileViewer();
+};
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && !$("fileViewerModal").hidden) {
+    closeFileViewer();
+  }
+});
+
+// Сохраняем обратную совместимость
+window.__inotesOpenLightbox = function(url) {
+  const n = notes.find(x => x.id === selectedId);
+  if (n) {
+    const b = (n.blocks || []).find(x => x.url === url);
+    if (b) {
+      window.__inotesOpenFileViewer(b.id);
+      return;
+    }
+  }
+  $("viewerIcon").textContent = "🖼️";
+  $("viewerTitle").textContent = "Изображение";
+  $("viewerMeta").textContent = "";
+  $("viewerContent").innerHTML = `<img class="af-viewer-img" src="${escapeHTML(url)}" alt="Фото">`;
+  $("viewerDownloadBtn").onclick = () => window.__inotesDownloadFile(url, null, "image.jpg");
+  $("fileViewerModal").hidden = false;
 };
 
 // -------------------------------------------------------------
