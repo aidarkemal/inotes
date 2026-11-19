@@ -5,182 +5,227 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="theme-color" content="#000000">
-  <meta name="description" content="iNotes — Apple Notes с Яндекс Диском">
+  <meta name="theme-color" content="#121316">
+  <meta name="description" content="iNotes Flow — блочный редактор заметок в стиле AppFlowy с Яндекс Диском">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icon-192.png">
   <link rel="apple-touch-icon" href="./icon-192.png">
   <link rel="stylesheet" href="./styles.css">
-  <title>iNotes</title>
+  <title>iNotes Flow</title>
 </head>
 <body class="dark">
-  <div class="app-shell">
+  <div class="appflowy-shell">
     
-    <!-- Боковое меню (Папки) -->
-    <aside class="sidebar" id="sidebar">
-      <header class="side-header">
-        <div class="brand"><span class="brand-icon">▤</span><span>Папки</span></div>
-        <button class="icon-btn" id="themeBtn" aria-label="Сменить тему" title="Сменить тему">◐</button>
+    <!-- Боковая панель AppFlowy (Sidebar) -->
+    <aside class="af-sidebar" id="sidebar">
+      <header class="af-side-header">
+        <div class="af-workspace-brand">
+          <span class="af-brand-badge">⚡</span>
+          <div class="af-brand-info">
+            <strong>iNotes Flow</strong>
+            <small id="workspaceTag">Личное пространство</small>
+          </div>
+        </div>
+        <button class="af-icon-btn" id="themeBtn" aria-label="Тема" title="Сменить тему">◐</button>
       </header>
       
-      <div class="section-label">ЯНДЕКС ОБЛАКО</div>
-      <nav class="folder-list" id="folderList">
-        <button class="folder active" data-folder="all">
-          <span class="folder-icon">📂</span><span>Все заметки</span><b id="allCount">0</b>
+      <!-- Поиск заметок -->
+      <div class="af-search-box">
+        <span class="af-search-icon">⌕</span>
+        <input id="searchInput" placeholder="Быстрый поиск..." autocomplete="off">
+      </div>
+
+      <!-- Навигация по папкам -->
+      <div class="af-nav-label">ДОКУМЕНТЫ</div>
+      <nav class="af-nav-list" id="folderList">
+        <button class="af-nav-item active" data-folder="all">
+          <span class="af-nav-icon">📂</span><span>Все страницы</span><b id="allCount">0</b>
         </button>
-        <button class="folder" data-folder="personal">
-          <span class="folder-icon">📁</span><span>Личные</span><b id="personalCount">0</b>
+        <button class="af-nav-item" data-folder="personal">
+          <span class="af-nav-icon">📁</span><span>Личные</span><b id="personalCount">0</b>
         </button>
-        <button class="folder" data-folder="work">
-          <span class="folder-icon">📁</span><span>Работа</span><b id="workCount">0</b>
+        <button class="af-nav-item" data-folder="work">
+          <span class="af-nav-icon">💼</span><span>Работа</span><b id="workCount">0</b>
         </button>
-        <button class="folder folder-trash" data-folder="trash">
-          <span class="folder-icon">🗑️</span><span>Недавно удалённые</span><b id="trashCount">0</b>
+        <button class="af-nav-item af-trash-item" data-folder="trash">
+          <span class="af-nav-icon">🗑️</span><span>Корзина</span><b id="trashCount">0</b>
         </button>
       </nav>
 
-      <div class="sidebar-bottom">
-        <div class="sync-card" id="syncCard">
-          <span class="sync-dot" id="syncDot"></span>
-          <div>
-            <strong id="syncTitle">Только на этом устройстве</strong>
-            <small id="syncSubtitle">Нажмите для синхронизации</small>
+      <!-- Карточка синхронизации с Яндекс Диском -->
+      <div class="af-sidebar-footer">
+        <div class="af-sync-tile" id="syncCard">
+          <span class="af-sync-indicator" id="syncDot"></span>
+          <div class="af-sync-meta">
+            <strong id="syncTitle">Только на устройстве</strong>
+            <small id="syncSubtitle">Нажмите для облака</small>
           </div>
         </div>
-        <button class="account-btn" id="accountBtn">
-          <span>☻</span>
-          <span id="accountLabel">Войти через Яндекс</span>
-          <span class="chevron">›</span>
+        <button class="af-account-trigger" id="accountBtn">
+          <span class="af-account-avatar">☻</span>
+          <span id="accountLabel">Яндекс Диск</span>
+          <span class="af-chevron">›</span>
         </button>
       </div>
     </aside>
 
-    <!-- Основной контейнер заметок -->
-    <main class="main">
+    <!-- Основная рабочая область -->
+    <main class="af-main">
       
-      <!-- Экран списка заметок (Apple Notes List View) -->
-      <section class="notes-pane" id="notesPane">
-        
-        <!-- Верхняя панель списка -->
-        <header class="ios-topbar">
-          <button class="ios-circle-btn" id="menuBtn" aria-label="Папки">
-            <span class="chevron-left">‹</span> <span class="topbar-btn-text">Папки</span>
-          </button>
-          <div class="topbar-center">
-            <h1 class="topbar-title" id="folderTitle">Все заметки</h1>
-            <span class="topbar-sub" id="notesCount">0 заметок</span>
+      <!-- Список страниц / заметок -->
+      <section class="af-list-pane" id="notesPane">
+        <header class="af-list-topbar">
+          <button class="af-icon-btn af-mobile-menu-btn" id="menuBtn" aria-label="Меню папок">☰</button>
+          <div class="af-list-header-text">
+            <h1 id="folderTitle">Все страницы</h1>
+            <span id="notesCount">0 документов</span>
           </div>
-          <button class="ios-circle-btn" id="emptyTrashBtn" style="display:none" title="Очистить корзину">
-            <span>🗑️</span>
-          </button>
-          <button class="ios-circle-btn" id="sidebarToggleBtnDesktop" aria-label="Меню">
-            <span>☰</span>
-          </button>
+          <button class="af-btn-primary" id="newNoteBtn"><span>＋</span> Новая страница</button>
+          <button class="af-btn-danger" id="emptyTrashBtn" style="display:none">Очистить корзину</button>
         </header>
 
-        <!-- Список заметок, сгруппированный по датам (Apple Notes style) -->
-        <div class="notes-scrollable-area" id="notesScrollArea">
-          <div class="grouped-notes-container" id="notesList"></div>
+        <!-- Прокручиваемый список карточек -->
+        <div class="af-list-scrollable" id="notesScrollArea">
+          <div class="af-cards-container" id="notesList"></div>
           
-          <div class="empty-state" id="emptyState">
-            <div class="empty-icon" id="emptyIcon">✎</div>
-            <h2 id="emptyTitle">Пока нет заметок</h2>
-            <p id="emptyText">Нажмите кнопку новой заметки внизу экрана.</p>
+          <div class="af-empty-state" id="emptyState">
+            <div class="af-empty-emoji" id="emptyIcon">📄</div>
+            <h2 id="emptyTitle">Нет документов</h2>
+            <p id="emptyText">Создайте первую страницу с помощью кнопки выше.</p>
           </div>
         </div>
-
-        <!-- Нижняя плавающая панель списка (Apple Notes Search & Compose) -->
-        <div class="ios-floating-bottombar" id="listBottomBar">
-          <div class="search-capsule">
-            <span class="search-icon">🔍</span>
-            <input id="searchInput" placeholder="Поиск" autocomplete="off">
-          </div>
-          <button class="compose-btn" id="newNoteBtn" aria-label="Новая заметка" title="Новая заметка">
-            <span class="compose-icon">📝</span>
-          </button>
-        </div>
-
       </section>
 
-      <!-- Экран редактора (Apple Notes Editor View) -->
-      <section class="editor-pane" id="editorPane">
+      <!-- Блочный редактор AppFlowy (Block Editor) -->
+      <section class="af-editor-pane" id="editorPane">
         
         <!-- Верхняя панель редактора -->
-        <header class="editor-ios-topbar">
-          <button class="ios-circle-btn" id="backBtn" aria-label="Назад к заметкам">
-            <span class="chevron-left">‹</span> <span class="topbar-btn-text" id="backBtnText">Заметки</span>
+        <header class="af-editor-topbar">
+          <button class="af-back-btn" id="backBtn" aria-label="Назад к списку">
+            ‹ <span id="backBtnText">Страницы</span>
           </button>
           
-          <div class="editor-topbar-center">
-            <span class="save-state-badge" id="saveState">Сохранено</span>
+          <div class="af-editor-status">
+            <span class="af-status-pill" id="saveState">Сохранено</span>
           </div>
 
-          <div class="editor-top-actions">
-            <!-- Меню в обычной заметке -->
-            <div id="normalActions" style="display:flex;align-items:center;gap:8px;">
-              <button class="ios-circle-btn" id="pinBtn" title="Закрепить заметку">
-                <span id="pinIcon">⌑</span>
-              </button>
-              <button class="ios-circle-btn danger" id="deleteBtn" title="Переместить в корзину">
-                <span>🗑️</span>
-              </button>
-            </div>
-            
-            <!-- Меню в корзине -->
-            <div id="trashActions" style="display:none;align-items:center;gap:8px;">
-              <button class="att-btn" id="restoreBtn">Восстановить</button>
-              <button class="att-btn danger" id="permDeleteBtn">Удалить</button>
-            </div>
+          <div class="af-editor-actions" id="normalActions">
+            <button class="af-action-icon" id="pinBtn" title="Закрепить страницу">
+              <span id="pinIcon">★</span>
+            </button>
+            <button class="af-action-icon danger" id="deleteBtn" title="В корзину">
+              <span>🗑️</span>
+            </button>
+          </div>
+
+          <div class="af-editor-actions" id="trashActions" style="display:none">
+            <button class="af-pill-btn" id="restoreBtn">Восстановить</button>
+            <button class="af-pill-btn danger" id="permDeleteBtn">Удалить навсегда</button>
           </div>
         </header>
 
-        <!-- Индикатор прогресса загрузки файлов -->
-        <div class="upload-progress-wrap" id="uploadProgressWrap" hidden>
-          <div class="upload-progress-info">
+        <!-- Полоса прогресса загрузки файлов до 200 МБ -->
+        <div class="af-upload-progress" id="uploadProgressWrap" hidden>
+          <div class="af-upload-info">
             <span id="uploadFileName">Загрузка файла на Яндекс Диск...</span>
             <span id="uploadPercent">0%</span>
           </div>
-          <div class="upload-progress-bar">
-            <div class="upload-progress-fill" id="uploadProgressFill"></div>
+          <div class="af-upload-track">
+            <div class="af-upload-bar" id="uploadProgressFill"></div>
           </div>
         </div>
 
-        <!-- Прокручиваемый контент заметки (Apple Notes Flow) -->
-        <div class="editor-scrollable-area" id="editorScrollArea">
-          <div class="editor-inner-content">
-            <input id="noteTitle" class="note-title" placeholder="Название заметки" maxlength="160">
-            <div class="note-date-label" id="noteMeta">19 ноября 2026 г., 23:26</div>
+        <!-- Полотно документа AppFlowy (Blocks Canvas) -->
+        <div class="af-canvas-scrollable" id="editorScrollArea">
+          <div class="af-document-canvas">
             
-            <!-- Основной текст заметки -->
-            <div id="noteBody" class="note-body" contenteditable="true" data-placeholder="Начните писать..." spellcheck="true"></div>
-            
-            <!-- Вложения прямо в потоке документа -->
-            <div class="note-attachments" id="noteAttachments"></div>
+            <!-- Заголовок страницы с иконкой (AppFlowy Header) -->
+            <div class="af-doc-header">
+              <button class="af-page-icon-btn" id="pageIconBtn" title="Сменить иконку">📝</button>
+              <input id="noteTitle" class="af-doc-title-input" placeholder="Без названия" maxlength="160">
+              <div class="af-doc-meta" id="noteMeta">19 ноября 2026 г.</div>
+            </div>
+
+            <!-- Контейнер блоков документа -->
+            <div class="af-blocks-container" id="blocksContainer">
+              <!-- Интерактивные блоки рендерятся сюда -->
+            </div>
+
+            <!-- Нижняя подсказка для слэш-команды -->
+            <div class="af-add-block-trigger" id="addBlockTrigger">
+              <span>Нажмите <b>＋</b> или наберите <b>/</b> для добавления блоков (фото, скан, чек-лист, видео)</span>
+            </div>
+
           </div>
         </div>
 
-        <!-- Нижняя плавающая панель редактора (Apple Notes Tools) -->
-        <div class="ios-editor-floating-bottombar" id="editorBottomBar">
-          <button class="bottom-tool-btn" id="checklistBtn" title="Список дел (чек-лист)">
-            <span>✓☷</span>
+        <!-- Нижняя плавающая панель быстрых инструментов AppFlowy -->
+        <div class="af-floating-toolbar" id="editorBottomBar">
+          <button class="af-tool-pill" id="quickAddBtn" title="Добавить блок (/)">
+            <span>＋ Блок</span>
           </button>
-          <button class="bottom-tool-btn" id="scanBtn" title="Сканировать документ с камеры">
-            <span>📷</span>
+          <button class="af-tool-pill" id="scanBtn" title="Скан документа с камеры">
+            <span>📷 Скан</span>
           </button>
-          <button class="bottom-tool-btn" id="attachBtn" title="Прикрепить файл (до 200 МБ)">
-            <span>📎</span>
+          <button class="af-tool-pill" id="attachBtn" title="Прикрепить файл (до 200 МБ)">
+            <span>📎 Файл</span>
           </button>
-          <button class="bottom-tool-btn" id="micBtn" title="Голосовая заметка (диктофон)">
-            <span>🎙️</span>
+          <button class="af-tool-pill" id="todoBtn" title="Чек-лист">
+            <span>☑️ Задача</span>
           </button>
-          <button class="bottom-tool-btn" id="editorNewBtn" title="Новая заметка">
-            <span>📝</span>
+          <button class="af-tool-pill" id="micBtn" title="Голосовая заметка">
+            <span>🎙️ Голос</span>
           </button>
         </div>
 
       </section>
 
     </main>
+  </div>
+
+  <!-- Всплывающее меню слэш-команд (AppFlowy Slash Menu) -->
+  <div class="af-slash-menu" id="slashMenu" hidden>
+    <div class="af-slash-header">ВСТАВИТЬ БЛОК</div>
+    <div class="af-slash-item" data-type="text">
+      <span class="af-slash-icon">📝</span>
+      <div><strong>Текст</strong><small>Обычный абзац текста</small></div>
+    </div>
+    <div class="af-slash-item" data-type="h1">
+      <span class="af-slash-icon">📌</span>
+      <div><strong>Большой заголовок</strong><small>Заголовок первого уровня</small></div>
+    </div>
+    <div class="af-slash-item" data-type="h2">
+      <span class="af-slash-icon">🏷️</span>
+      <div><strong>Подзаголовок</strong><small>Заголовок второго уровня</small></div>
+    </div>
+    <div class="af-slash-item" data-type="todo">
+      <span class="af-slash-icon">☑️</span>
+      <div><strong>Список дел</strong><small>Чек-лист с галочкой</small></div>
+    </div>
+    <div class="af-slash-item" data-type="scan">
+      <span class="af-slash-icon">📷</span>
+      <div><strong>Скан документа</strong><small>Камера с улучшением контраста</small></div>
+    </div>
+    <div class="af-slash-item" data-type="photo">
+      <span class="af-slash-icon">🖼️</span>
+      <div><strong>Фотография / Картинка</strong><small>Изображение во всю ширину</small></div>
+    </div>
+    <div class="af-slash-item" data-type="file">
+      <span class="af-slash-icon">📁</span>
+      <div><strong>Файл / Документ</strong><small>PDF, Word, Excel, ZIP до 200 МБ</small></div>
+    </div>
+    <div class="af-slash-item" data-type="audio">
+      <span class="af-slash-icon">🎙️</span>
+      <div><strong>Голосовая запись</strong><small>Диктофон с встроенным плеером</small></div>
+    </div>
+    <div class="af-slash-item" data-type="callout">
+      <span class="af-slash-icon">💡</span>
+      <div><strong>Выделение (Callout)</strong><small>Блок с рамкой и подсветкой</small></div>
+    </div>
+    <div class="af-slash-item" data-type="divider">
+      <span class="af-slash-icon">➖</span>
+      <div><strong>Разделитель</strong><small>Тонкая горизонтальная линия</small></div>
+    </div>
   </div>
 
   <!-- Скрытые инпуты выбора файлов -->
@@ -192,14 +237,14 @@
     <section class="modal">
       <button class="modal-close" id="closeAuth">×</button>
       <div class="modal-logo yandex-logo">Я</div>
-      <h2 id="authHeading">Яндекс Диск</h2>
-      <p class="modal-copy" id="authSubtitle">Синхронизируйте заметки и загружайте файлы до 200 МБ в ваше личное облако.</p>
+      <h2>Яндекс Диск</h2>
+      <p class="modal-copy">Все документы и файлы автоматически сохраняются в вашем личном облаке.</p>
 
       <div id="authLoggedOut">
         <button class="yandex-auth-btn" id="yandexLoginBtn">
           <span class="yandex-badge">Я</span> Войти с Яндекс ID
         </button>
-        <p class="tiny-note">Приложение автоматически создаст папку <b>iNotes</b> на вашем Диске.</p>
+        <p class="tiny-note">В вашем облаке будет автоматически создана папка <b>iNotes</b>.</p>
       </div>
 
       <div id="authLoggedIn" hidden>
@@ -217,7 +262,7 @@
     </section>
   </div>
 
-  <!-- Лайтбокс для просмотра фото на весь экран -->
+  <!-- Лайтбокс фото во весь экран -->
   <div class="lightbox-backdrop" id="lightboxModal" hidden>
     <button class="lightbox-close" id="closeLightbox">✕</button>
     <img id="lightboxImg" src="" alt="Фото">

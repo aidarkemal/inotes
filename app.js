@@ -1,13 +1,10 @@
 import * as YD from "./yandex-disk.js";
 
 const $ = id => document.getElementById(id);
-const STORE = "inotes-notes-v2";
-const DELETED_STORE = "inotes-deleted-v2";
+const STORE = "inotes-appflowy-v1";
+const DELETED_STORE = "inotes-deleted-v3";
 
-let notes = JSON.parse(localStorage.getItem(STORE) || "null");
-if (!notes) {
-  notes = JSON.parse(localStorage.getItem("inotes-notes-v1") || "[]");
-}
+let notes = loadInitialNotes();
 let deletedIds = new Set(JSON.parse(localStorage.getItem(DELETED_STORE) || "[]"));
 let selectedId = null;
 let activeFolder = "all";
@@ -24,6 +21,9 @@ let audioChunks = [];
 let recordTimer = null;
 let recordSeconds = 0;
 
+// Слэш-меню
+let slashTargetBlockId = null;
+
 function uid() {
   return crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2);
 }
@@ -32,32 +32,11 @@ function escapeHTML(s = "") {
   return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-function plainText(html = "") {
-  const d = document.createElement("div");
-  d.innerHTML = html;
-  return (d.innerText || d.textContent || "").trim();
-}
-
 function formatBytes(bytes) {
   if (!bytes || bytes === 0) return "0 Б";
   const k = 1024, sizes = ["Б", "КБ", "МБ", "ГБ"];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
-}
-
-// Форматирование дат в стиле Apple Notes (Сегодня, 24.02.2026 и т.д.)
-function formatNoteDate(ts) {
-  const d = new Date(ts || Date.now());
-  const now = new Date();
-  const isToday = d.toDateString() === now.toDateString();
-  if (isToday) {
-    return d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
-  }
-  const isYesterday = new Date(now.setDate(now.getDate() - 1)).toDateString() === d.toDateString();
-  if (isYesterday) {
-    return "Вчера";
-  }
-  return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
 function formatDetailDate(ts) {
@@ -74,10 +53,98 @@ function toast(msg) {
   toastTimer = setTimeout(() => el.classList.remove("show"), 2600);
 }
 
+// -------------------------------------------------------------
+// Загрузка и миграция заметок в блочную структуру AppFlowy
+// -------------------------------------------------------------
+function loadInitialNotes() {
+  const raw = localStorage.getItem(STORE);
+  if (raw) {
+    try { return JSON.parse(raw); } catch (e) {}
+  }
+
+  // Миграция из предыдущих версий
+  const oldRaw = localStorage.getItem("inotes-notes-v2") || localStorage.getItem("inotes-notes-v1");
+  if (oldRaw) {
+    try {
+      const oldNotes = JSON.parse(oldRaw);
+      return oldNotes.map(n => migrateOldNote(n));
+    } catch (e) {}
+  }
+
+  return [];
+}
+
+function migrateOldNote(n) {
+  const blocks = [];
+
+  // Конвертируем старый HTML текст в блоки
+  if (n.body) {
+    const temp = document.createElement("div");
+    temp.innerHTML = n.body;
+    const lines = temp.innerText.split("\n").filter(l => l.trim().length > 0);
+    for (const line of lines) {
+      if (line.startsWith("•") || line.startsWith("-")) {
+        blocks.push({ id: uid(), type: "todo", content: line.replace(/^[•-]\s*/, ""), checked: false });
+      } else {
+        blocks.push({ id: uid(), type: "text", content: line });
+      }
+    }
+  }
+
+  // Конвертируем старые вложения в блоки прямо в потоке
+  if (n.attachments && n.attachments.length) {
+    for (const att of n.attachments) {
+      if (att.category === "photo") {
+        blocks.push({
+          id: att.id || uid(),
+          type: "image",
+          url: att.url,
+          name: att.name,
+          size: att.size,
+          path: att.path
+        });
+      } else if (att.category === "audio") {
+        blocks.push({
+          id: att.id || uid(),
+          type: "audio",
+          url: att.url,
+          name: att.name,
+          size: att.size,
+          path: att.path
+        });
+      } else {
+        blocks.push({
+          id: att.id || uid(),
+          type: "file",
+          url: att.url,
+          name: att.name,
+          size: att.size,
+          path: att.path
+        });
+      }
+    }
+  }
+
+  if (blocks.length === 0) {
+    blocks.push({ id: uid(), type: "text", content: "" });
+  }
+
+  return {
+    id: n.id || uid(),
+    title: n.title || "Без названия",
+    icon: n.icon || "📝",
+    folder: n.folder || "personal",
+    pinned: !!n.pinned,
+    trashed: !!n.trashed,
+    updated: n.updated || Date.now(),
+    blocks
+  };
+}
+
 function persistLocally() {
   localStorage.setItem(STORE, JSON.stringify(notes));
   localStorage.setItem(DELETED_STORE, JSON.stringify([...deletedIds]));
-  renderList();
+  renderDocList();
   scheduleCloudSync();
 }
 
@@ -90,20 +157,20 @@ function setSyncStatus(state) {
   const subtitle = $("syncSubtitle");
 
   if (state === "syncing") {
-    dot.className = "sync-dot syncing";
+    dot.className = "af-sync-indicator syncing";
     $("saveState").textContent = "Синхронизация…";
     title.textContent = "Синхронизация…";
-    subtitle.textContent = "Обновление заметок на Диске";
+    subtitle.textContent = "Обновление в облаке";
   } else if (state === "online") {
-    dot.className = "sync-dot online";
-    $("saveState").textContent = "Сохранено";
-    title.textContent = "Яндекс Диск подключён";
-    subtitle.textContent = currentUser ? (currentUser.default_email || currentUser.display_name) : "Облако активно";
+    dot.className = "af-sync-indicator online";
+    $("saveState").textContent = "Сохранено на Диске";
+    title.textContent = "Яндекс Диск активен";
+    subtitle.textContent = currentUser ? (currentUser.default_email || currentUser.display_name) : "Синхронизировано";
   } else {
-    dot.className = "sync-dot";
+    dot.className = "af-sync-indicator";
     $("saveState").textContent = "Локально";
-    title.textContent = "Только на этом устройстве";
-    subtitle.textContent = "Нажмите для синхронизации";
+    title.textContent = "Только на устройстве";
+    subtitle.textContent = "Нажмите для облака";
   }
 }
 
@@ -151,9 +218,9 @@ async function runTwoWaySync() {
       updatedAt: Date.now()
     });
 
-    renderList();
+    renderDocList();
     if (selectedId && notes.some(n => n.id === selectedId)) {
-      renderAttachments(notes.find(n => n.id === selectedId));
+      renderBlocks(notes.find(n => n.id === selectedId));
     }
 
     setSyncStatus("online");
@@ -173,46 +240,9 @@ function scheduleCloudSync(debounceMs = 1500) {
 }
 
 // -------------------------------------------------------------
-// Группировка заметок по разделам Apple Notes (Screenshot 2)
+// Рендер списка документов
 // -------------------------------------------------------------
-function groupNotesByDate(noteList) {
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const sevenDaysAgo = startOfToday - 7 * 86400000;
-  const thirtyDaysAgo = startOfToday - 30 * 86400000;
-
-  const groups = {
-    pinned: [],
-    today: [],
-    sevenDays: [],
-    thirtyDays: [],
-    older: []
-  };
-
-  for (const n of noteList) {
-    if (n.pinned && activeFolder !== "trash") {
-      groups.pinned.push(n);
-      continue;
-    }
-    const t = n.updated || n.trashedAt || Date.now();
-    if (t >= startOfToday) {
-      groups.today.push(n);
-    } else if (t >= sevenDaysAgo) {
-      groups.sevenDays.push(n);
-    } else if (t >= thirtyDaysAgo) {
-      groups.thirtyDays.push(n);
-    } else {
-      groups.older.push(n);
-    }
-  }
-
-  return groups;
-}
-
-// -------------------------------------------------------------
-// Рендер списка заметок (Apple Notes List View)
-// -------------------------------------------------------------
-function renderList() {
+function renderDocList() {
   const inTrash = activeFolder === "trash";
 
   const filtered = notes.filter(n => {
@@ -225,8 +255,9 @@ function renderList() {
 
     const q = searchTerm.toLowerCase();
     if (q) {
-      const match = (n.title || "").toLowerCase().includes(q) || plainText(n.body).toLowerCase().includes(q);
-      if (!match) return false;
+      const matchTitle = (n.title || "").toLowerCase().includes(q);
+      const matchBlocks = (n.blocks || []).some(b => (b.content || b.name || "").toLowerCase().includes(q));
+      if (!matchTitle && !matchBlocks) return false;
     }
     return true;
   });
@@ -241,136 +272,86 @@ function renderList() {
   $("workCount").textContent = activeNotes.filter(n => n.folder === "work").length;
   $("trashCount").textContent = trashNotes.length;
 
-  // Заголовок верхней панели
   if (inTrash) {
-    $("folderTitle").textContent = "Недавно удалённые";
-    $("emptyTrashBtn").style.display = trashNotes.length ? "flex" : "none";
+    $("folderTitle").textContent = "Корзина";
+    $("emptyTrashBtn").style.display = trashNotes.length ? "inline-block" : "none";
+    $("newNoteBtn").style.display = "none";
     $("backBtnText").textContent = "Корзина";
   } else {
-    $("folderTitle").textContent = ({ all: "Все заметки", personal: "Личные", work: "Работа" })[activeFolder] || "Заметки";
+    $("folderTitle").textContent = ({ all: "Все страницы", personal: "Личные", work: "Работа" })[activeFolder] || "Страницы";
     $("emptyTrashBtn").style.display = "none";
-    $("backBtnText").textContent = "Заметки";
+    $("newNoteBtn").style.display = "inline-flex";
+    $("backBtnText").textContent = "Страницы";
   }
 
-  $("notesCount").textContent = `${filtered.length} ${filtered.length === 1 ? "заметка" : "заметок"}`;
+  $("notesCount").textContent = `${filtered.length} ${filtered.length === 1 ? "документ" : "документов"}`;
 
   if (filtered.length === 0) {
     $("notesList").innerHTML = "";
     $("emptyState").classList.add("show");
-    if (inTrash) {
-      $("emptyIcon").textContent = "🗑️";
-      $("emptyTitle").textContent = "Корзина пуста";
-      $("emptyText").textContent = "Удалённые заметки будут отображаться здесь.";
-    } else {
-      $("emptyIcon").textContent = "✎";
-      $("emptyTitle").textContent = "Пока нет заметок";
-      $("emptyText").textContent = "Нажмите значок 📝 внизу для создания первой заметки.";
-    }
     return;
   }
 
   $("emptyState").classList.remove("show");
 
-  // Разбиваем заметки на группы в стиле Apple Notes (Screenshot 2)
-  const groups = groupNotesByDate(filtered);
-  const sectionConfigs = [
-    { key: "pinned", title: "Закреплено" },
-    { key: "today", title: "Сегодня" },
-    { key: "sevenDays", title: "Предыдущие 7 дней" },
-    { key: "thirtyDays", title: "Предыдущие 30 дней" },
-    { key: "older", title: "Ранее" }
-  ];
+  $("notesList").innerHTML = filtered.map(n => {
+    // Ищем первое фото для превью справа
+    const firstImg = (n.blocks || []).find(b => b.type === "image" && b.url);
+    const thumbHtml = firstImg
+      ? `<img class="af-card-thumb" src="${escapeHTML(firstImg.url)}" alt="превью" loading="lazy">`
+      : "";
 
-  let html = "";
-  for (const s of sectionConfigs) {
-    const list = groups[s.key];
-    if (!list || list.length === 0) continue;
+    // Текстовое превью
+    const firstText = (n.blocks || []).find(b => b.type === "text" || b.type === "todo" || b.type === "h1");
+    const preview = firstText ? escapeHTML(firstText.content || "") : "Пустой документ";
 
-    html += `
-      <div class="section-group">
-        <div class="section-header-title">${s.title}</div>
-        <div class="grouped-card">
-          ${list.map(n => renderNoteRow(n)).join("")}
+    return `
+      <div class="af-doc-card ${n.id === selectedId ? "selected" : ""}" data-id="${escapeHTML(n.id)}">
+        <span class="af-card-icon">${n.icon || "📄"}</span>
+        <div class="af-card-body">
+          <div class="af-card-title">${escapeHTML(n.title || "Без названия")}</div>
+          <div class="af-card-preview">${preview}</div>
+          <div class="af-card-meta">
+            <span>${new Date(n.updated).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}</span>
+            <span>·</span>
+            <span>${n.folder === "work" ? "Работа" : "Личные"}</span>
+          </div>
         </div>
+        ${thumbHtml}
       </div>
     `;
-  }
+  }).join("");
 
-  $("notesList").innerHTML = html;
-  document.querySelectorAll(".folder").forEach(b => b.classList.toggle("active", b.dataset.folder === activeFolder));
-}
-
-// Рендер строки заметки (как в Screenshot 2: заголовок, дата, текст и превью справа)
-function renderNoteRow(n) {
-  const title = escapeHTML(n.title || "Без названия");
-  const dateStr = formatNoteDate(n.updated);
-  const bodySnippet = plainText(n.body) || "Нет текста";
-
-  // Проверяем наличие фото/скана для правого мини-превью
-  const firstMedia = (n.attachments || []).find(a => a.category === "photo" && a.url);
-  const thumbHtml = firstMedia
-    ? `<img class="note-item-thumb" src="${escapeHTML(firstMedia.url)}" alt="превью" loading="lazy">`
-    : "";
-
-  let snippetText = escapeHTML(bodySnippet);
-  const attCount = (n.attachments || []).length;
-  if (attCount > 0 && !bodySnippet) {
-    snippetText = `${attCount} вложенных файлов`;
-  }
-
-  const folderName = n.folder === "work" ? "Работа" : "Заметки";
-
-  return `
-    <div class="note-item-row ${n.id === selectedId ? "selected" : ""}" data-id="${escapeHTML(n.id)}">
-      <div class="note-item-left">
-        <div class="note-item-title">${title}</div>
-        <div class="note-item-subline">
-          <span class="note-item-date">${dateStr}</span>
-          <span class="note-item-snippet">${snippetText}</span>
-        </div>
-        <div class="note-item-folder">📁 ${folderName}</div>
-      </div>
-      ${thumbHtml}
-    </div>
-  `;
+  document.querySelectorAll(".af-nav-item").forEach(b => b.classList.toggle("active", b.dataset.folder === activeFolder));
 }
 
 // -------------------------------------------------------------
-// Открытие заметки и отображение контента (Apple Notes Flow)
+// Открытие документа и рендер блоков AppFlowy
 // -------------------------------------------------------------
 function openNote(id) {
   selectedId = id;
   const n = notes.find(x => x.id === id);
   if (!n) return;
 
+  $("pageIconBtn").textContent = n.icon || "📝";
   $("noteTitle").value = n.title || "";
-  $("noteBody").innerHTML = n.body || "";
   $("noteMeta").textContent = formatDetailDate(n.updated);
-  $("pinBtn").classList.toggle("active", !!n.pinned);
-  $("pinIcon").textContent = n.pinned ? "★" : "⌑";
 
   if (n.trashed) {
     $("normalActions").style.display = "none";
     $("trashActions").style.display = "flex";
     $("editorBottomBar").style.display = "none";
     $("noteTitle").disabled = true;
-    $("noteBody").contentEditable = "false";
   } else {
     $("normalActions").style.display = "flex";
     $("trashActions").style.display = "none";
     $("editorBottomBar").style.display = "flex";
     $("noteTitle").disabled = false;
-    $("noteBody").contentEditable = "true";
   }
 
-  // Обновляем вложения прямо в потоке документа
-  renderAttachments(n);
-
+  renderBlocks(n);
   $("editorPane").classList.add("mobile-open");
-  renderList();
-
-  // Прокручиваем редактор наверх при открытии новой заметки
-  $("editorScrollArea").scrollTop = 0;
+  renderDocList();
 }
 
 function closeEditor() {
@@ -378,19 +359,21 @@ function closeEditor() {
 }
 
 function createNote() {
-  if (activeFolder === "trash") {
-    activeFolder = "all";
-  }
+  if (activeFolder === "trash") activeFolder = "all";
+
   const n = {
     id: uid(),
     title: "",
-    body: "",
+    icon: "📝",
     folder: activeFolder === "work" ? "work" : "personal",
     pinned: false,
     trashed: false,
-    attachments: [],
-    updated: Date.now()
+    updated: Date.now(),
+    blocks: [
+      { id: uid(), type: "text", content: "" }
+    ]
   };
+
   notes.unshift(n);
   selectedId = n.id;
   persistLocally();
@@ -406,236 +389,354 @@ function updateSelected(patch) {
   persistLocally();
 }
 
-// Удаление в корзину
-function moveToTrash() {
-  if (!selectedId) return;
-  const n = notes.find(x => x.id === selectedId);
-  if (!n) return;
-
-  n.trashed = true;
-  n.trashedAt = Date.now();
-  n.pinned = false;
-  persistLocally();
-
-  const next = notes.find(x => !x.trashed);
-  selectedId = next?.id || null;
-  if (selectedId) {
-    openNote(selectedId);
-  } else {
-    $("noteTitle").value = "";
-    $("noteBody").innerHTML = "";
-    $("noteAttachments").innerHTML = "";
-    closeEditor();
-  }
-  toast("Заметка перемещена в корзину");
-}
-
-// Восстановление
-function restoreFromTrash() {
-  if (!selectedId) return;
-  const n = notes.find(x => x.id === selectedId);
-  if (!n) return;
-
-  n.trashed = false;
-  delete n.trashedAt;
-  n.updated = Date.now();
-  persistLocally();
-
-  activeFolder = "all";
-  renderList();
-  openNote(n.id);
-  toast("Заметка восстановлена!");
-}
-
-// Удаление навсегда
-function deletePermanently() {
-  if (!selectedId) return;
-  if (!confirm("Удалить заметку навсегда? Это действие нельзя отменить.")) return;
-
-  const id = selectedId;
-  const n = notes.find(x => x.id === id);
-  if (n && n.attachments && currentToken) {
-    for (const a of n.attachments) {
-      if (a.path) YD.deleteRemoteFile(currentToken, a.path);
-    }
-  }
-
-  deletedIds.add(id);
-  notes = notes.filter(x => x.id !== id);
-  selectedId = notes.find(x => x.trashed)?.id || notes[0]?.id || null;
-  persistLocally();
-
-  if (selectedId) openNote(selectedId);
-  else closeEditor();
-  toast("Заметка удалена навсегда");
-}
-
-function emptyTrash() {
-  const count = notes.filter(n => n.trashed).length;
-  if (!count) return;
-  if (!confirm(`Очистить корзину (${count} заметок)? Все они будут удалены навсегда.`)) return;
-
-  for (const n of notes.filter(n => n.trashed)) {
-    deletedIds.add(n.id);
-    if (n.attachments && currentToken) {
-      for (const a of n.attachments) {
-        if (a.path) YD.deleteRemoteFile(currentToken, a.path);
-      }
-    }
-  }
-
-  notes = notes.filter(n => !n.trashed);
-  selectedId = notes[0]?.id || null;
-  persistLocally();
-  if (selectedId) openNote(selectedId);
-  else closeEditor();
-  toast("Корзина очищена");
-}
-
 // -------------------------------------------------------------
-// Рендер вложений прямо в потоке документа (Screenshot 3)
+// Рендер интерактивных блоков контента (Blocks Canvas)
 // -------------------------------------------------------------
-async function renderAttachments(note) {
-  const container = $("noteAttachments");
-  if (!note || !note.attachments || note.attachments.length === 0) {
-    container.innerHTML = "";
-    return;
+function renderBlocks(n) {
+  const container = $("blocksContainer");
+  if (!n.blocks || n.blocks.length === 0) {
+    n.blocks = [{ id: uid(), type: "text", content: "" }];
   }
 
-  // Обновляем ссылки на скачивание, если они истекли
-  if (currentToken) {
-    for (const att of note.attachments) {
-      if (!att.url || (att.urlExpires && att.urlExpires < Date.now() + 60000)) {
-        YD.getFileDownloadUrl(currentToken, att.path).then(freshUrl => {
-          if (freshUrl) {
-            att.url = freshUrl;
-            att.urlExpires = Date.now() + 3 * 3600 * 1000;
-            const el = container.querySelector(`[data-att-id="${att.id}"] img, [data-att-id="${att.id}"] video, [data-att-id="${att.id}"] a`);
-            if (el) {
-              if (el.tagName === "IMG" || el.tagName === "VIDEO") el.src = freshUrl;
-              if (el.tagName === "A") el.href = freshUrl;
-            }
+  container.innerHTML = n.blocks.map(b => renderSingleBlock(b, !!n.trashed)).join("");
+
+  // Навешиваем слушатели на contenteditable блоки
+  container.querySelectorAll("[data-block-id]").forEach(el => {
+    const bId = el.dataset.blockId;
+    const editable = el.querySelector("[contenteditable=true]");
+    if (editable) {
+      editable.addEventListener("input", () => {
+        const blk = n.blocks.find(b => b.id === bId);
+        if (blk) {
+          blk.content = editable.innerText;
+          updateSelected({ blocks: n.blocks });
+
+          // Если ввели слэш '/', показываем слэш-меню
+          if (editable.innerText === "/") {
+            showSlashMenu(bId, editable);
+          } else {
+            hideSlashMenu();
           }
-        });
-      }
+        }
+      });
+
+      // Переход на новую строку (Enter) создаёт новый блок
+      editable.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          insertBlockBelow(bId, "text");
+        } else if (e.key === "Backspace" && editable.innerText.trim() === "" && n.blocks.length > 1) {
+          e.preventDefault();
+          removeBlock(bId);
+        }
+      });
+    }
+  });
+}
+
+function renderSingleBlock(b, isTrashed) {
+  const id = escapeHTML(b.id);
+  const handleHtml = isTrashed ? "" : `<div class="af-block-handle" onclick="window.__inotesHandleClick('${id}', event)" title="Добавить блок">＋</div>`;
+
+  // 1. Текст (Абзац)
+  if (b.type === "text") {
+    return `
+      <div class="af-block-wrapper" data-block-id="${id}">
+        ${handleHtml}
+        <div class="af-block-content">
+          <div class="af-text-block" contenteditable="${!isTrashed}" data-placeholder="Наберите текст или '/' для вставки медиа...">${escapeHTML(b.content || "")}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  // 2. Заголовок H1
+  if (b.type === "h1") {
+    return `
+      <div class="af-block-wrapper" data-block-id="${id}">
+        ${handleHtml}
+        <div class="af-block-content">
+          <div class="af-h1-block" contenteditable="${!isTrashed}" data-placeholder="Заголовок...">${escapeHTML(b.content || "")}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  // 3. Подзаголовок H2
+  if (b.type === "h2") {
+    return `
+      <div class="af-block-wrapper" data-block-id="${id}">
+        ${handleHtml}
+        <div class="af-block-content">
+          <div class="af-h2-block" contenteditable="${!isTrashed}" data-placeholder="Подзаголовок...">${escapeHTML(b.content || "")}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  // 4. Список задач (Todo)
+  if (b.type === "todo") {
+    const isChecked = !!b.checked;
+    return `
+      <div class="af-block-wrapper" data-block-id="${id}">
+        ${handleHtml}
+        <div class="af-block-content">
+          <div class="af-todo-block">
+            <div class="af-todo-checkbox ${isChecked ? "checked" : ""}" onclick="window.__inotesToggleTodo('${id}')"></div>
+            <div class="af-todo-text ${isChecked ? "checked" : ""}" contenteditable="${!isTrashed}">${escapeHTML(b.content || "")}</div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // 5. Изображение / Скан (100% ширины, прямо в потоке)
+  if (b.type === "image") {
+    const safeUrl = escapeHTML(b.url || "");
+    const name = escapeHTML(b.name || "Изображение");
+    return `
+      <div class="af-block-wrapper" data-block-id="${id}">
+        ${handleHtml}
+        <div class="af-block-content">
+          <div class="af-image-block">
+            <img class="af-image-preview" src="${safeUrl}" alt="${name}" loading="lazy" onclick="window.__inotesOpenLightbox('${safeUrl}')">
+            <div class="af-media-footer">
+              <div>
+                <span class="af-media-title">${name}</span>
+                <span class="af-media-sub"> · ${formatBytes(b.size)}</span>
+              </div>
+              <div class="af-media-actions">
+                <a class="af-media-btn" href="${safeUrl}" target="_blank" download="${name}">Скачать</a>
+                ${isTrashed ? "" : `<button class="af-media-del" onclick="window.__inotesRemoveBlock('${id}')" title="Удалить блок">✕</button>`}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // 6. Аудио / Диктофон
+  if (b.type === "audio") {
+    const safeUrl = escapeHTML(b.url || "");
+    const name = escapeHTML(b.name || "Голосовая запись");
+    return `
+      <div class="af-block-wrapper" data-block-id="${id}">
+        ${handleHtml}
+        <div class="af-block-content">
+          <div class="af-file-card">
+            <span class="af-file-icon">🎙️</span>
+            <div class="af-file-info">
+              <div class="af-file-name">${name}</div>
+              <audio src="${safeUrl}" controls style="width:100%;height:32px;margin-top:6px;"></audio>
+            </div>
+            ${isTrashed ? "" : `<button class="af-media-del" onclick="window.__inotesRemoveBlock('${id}')" title="Удалить">✕</button>`}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // 7. Файл / Документ (PDF, Word, Excel, ZIP)
+  if (b.type === "file") {
+    const safeUrl = escapeHTML(b.url || "");
+    const name = escapeHTML(b.name || "Файл");
+    let icon = "📄";
+    if (name.endsWith(".pdf")) icon = "📕";
+    else if (/\.(docx?|pages|txt|rtf)$/i.test(name)) icon = "📘";
+    else if (/\.(xlsx?|numbers|csv)$/i.test(name)) icon = "📗";
+    else if (/\.(zip|rar|7z)$/i.test(name)) icon = "📦";
+
+    return `
+      <div class="af-block-wrapper" data-block-id="${id}">
+        ${handleHtml}
+        <div class="af-block-content">
+          <div class="af-file-card">
+            <span class="af-file-icon">${icon}</span>
+            <div class="af-file-info">
+              <div class="af-file-name">${name}</div>
+              <div class="af-file-meta">${formatBytes(b.size)} · Документ на Яндекс Диске</div>
+            </div>
+            <a class="af-media-btn" href="${safeUrl}" target="_blank" download="${name}">Открыть</a>
+            ${isTrashed ? "" : `<button class="af-media-del" onclick="window.__inotesRemoveBlock('${id}')" title="Удалить">✕</button>`}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // 8. Callout выделение
+  if (b.type === "callout") {
+    return `
+      <div class="af-block-wrapper" data-block-id="${id}">
+        ${handleHtml}
+        <div class="af-block-content">
+          <div class="af-callout-block">
+            <span class="af-callout-emoji">💡</span>
+            <div class="af-callout-text" contenteditable="${!isTrashed}" data-placeholder="Важная мысль...">${escapeHTML(b.content || "")}</div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // 9. Разделитель
+  if (b.type === "divider") {
+    return `
+      <div class="af-block-wrapper" data-block-id="${id}">
+        ${handleHtml}
+        <div class="af-block-content">
+          <div class="af-divider-block"></div>
+        </div>
+      </div>
+    `;
+  }
+
+  return "";
+}
+
+// -------------------------------------------------------------
+// Операции с блоками
+// -------------------------------------------------------------
+function insertBlockBelow(targetId, type) {
+  const n = notes.find(x => x.id === selectedId);
+  if (!n) return;
+
+  const idx = n.blocks.findIndex(b => b.id === targetId);
+  const newBlock = { id: uid(), type, content: "" };
+
+  if (idx !== -1) {
+    n.blocks.splice(idx + 1, 0, newBlock);
+  } else {
+    n.blocks.push(newBlock);
+  }
+
+  updateSelected({ blocks: n.blocks });
+  renderBlocks(n);
+
+  // Фокусируемся на новом блоке
+  setTimeout(() => {
+    const newEl = document.querySelector(`[data-block-id="${newBlock.id}"] [contenteditable=true]`);
+    if (newEl) newEl.focus();
+  }, 50);
+}
+
+function removeBlock(blockId) {
+  const n = notes.find(x => x.id === selectedId);
+  if (!n || n.blocks.length <= 1) return;
+
+  const idx = n.blocks.findIndex(b => b.id === blockId);
+  if (idx !== -1) {
+    const prevBlock = n.blocks[idx - 1] || n.blocks[idx + 1];
+    n.blocks.splice(idx, 1);
+    updateSelected({ blocks: n.blocks });
+    renderBlocks(n);
+
+    if (prevBlock) {
+      setTimeout(() => {
+        const el = document.querySelector(`[data-block-id="${prevBlock.id}"] [contenteditable=true]`);
+        if (el) el.focus();
+      }, 50);
     }
   }
-
-  container.innerHTML = note.attachments.map(att => renderAttachmentItem(att, !!note.trashed)).join("");
 }
 
-function renderAttachmentItem(att, isNoteTrashed) {
-  const id = escapeHTML(att.id);
-  const name = escapeHTML(att.name || "Файл");
-  const size = formatBytes(att.size);
-  const safeUrl = escapeHTML(att.url || "#");
-  const delBtn = isNoteTrashed ? "" : `<button class="att-del" onclick="window.__inotesDeleteAtt('${id}')" title="Удалить файл">✕</button>`;
+window.__inotesRemoveBlock = removeBlock;
 
-  // 1. Фото / Скан (Screenshot 3 — фото во всю ширину, закруглённые углы)
-  if (att.category === "photo") {
-    return `
-      <div class="attachment-media-card" data-att-id="${id}">
-        <img class="att-image-preview" src="${safeUrl}" alt="${name}" loading="lazy" onclick="window.__inotesOpenLightbox('${safeUrl}')">
-        <div class="attachment-media-bar">
-          <div>
-            <div style="font-size:13px;font-weight:600;">${name}</div>
-            <div style="font-size:11px;color:var(--text-muted);">${size} · Фото</div>
-          </div>
-          <div class="att-actions">
-            <a class="att-btn" href="${safeUrl}" target="_blank" download="${name}">Скачать</a>
-            ${delBtn}
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
-  // 2. Видео
-  if (att.category === "video") {
-    return `
-      <div class="attachment-media-card" data-att-id="${id}">
-        <video class="att-video-preview" src="${safeUrl}" controls preload="metadata"></video>
-        <div class="attachment-media-bar">
-          <div>
-            <div style="font-size:13px;font-weight:600;">${name}</div>
-            <div style="font-size:11px;color:var(--text-muted);">${size} · Видео</div>
-          </div>
-          <div class="att-actions">
-            <a class="att-btn" href="${safeUrl}" target="_blank" download="${name}">Скачать</a>
-            ${delBtn}
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
-  // 3. Аудио / Диктофон
-  if (att.category === "audio") {
-    return `
-      <div class="attachment-card" data-att-id="${id}">
-        <div class="att-icon">🎙️</div>
-        <div class="att-info">
-          <div class="att-name">${name}</div>
-          <audio src="${safeUrl}" controls style="width:100%;height:34px;margin-top:6px;"></audio>
-          <div class="att-meta">${size} · Голосовая заметка</div>
-        </div>
-        <div class="att-actions">${delBtn}</div>
-      </div>
-    `;
-  }
-
-  // 4. Документы
-  let icon = "📄";
-  if (name.endsWith(".pdf")) icon = "📕";
-  else if (/\.(docx?|pages|txt|rtf)$/i.test(name)) icon = "📘";
-  else if (/\.(xlsx?|numbers|csv)$/i.test(name)) icon = "📗";
-  else if (/\.(zip|rar|7z|tar|gz)$/i.test(name)) icon = "📦";
-
-  return `
-    <div class="attachment-card" data-att-id="${id}">
-      <div class="att-icon">${icon}</div>
-      <div class="att-info">
-        <div class="att-name" title="${name}">${name}</div>
-        <div class="att-meta">${size} · ${att.label || "Документ"}</div>
-      </div>
-      <div class="att-actions">
-        <a class="att-btn" href="${safeUrl}" target="_blank" download="${name}">Открыть</a>
-        ${delBtn}
-      </div>
-    </div>
-  `;
-}
-
-// Полноэкранный просмотр фото (Лайтбокс)
-window.__inotesOpenLightbox = function(url) {
-  $("lightboxImg").src = url;
-  $("lightboxModal").hidden = false;
-};
-$("closeLightbox").onclick = () => {
-  $("lightboxModal").hidden = true;
-  $("lightboxImg").src = "";
-};
-
-window.__inotesDeleteAtt = async function(attId) {
+window.__inotesToggleTodo = function(blockId) {
   const n = notes.find(x => x.id === selectedId);
-  if (!n || n.trashed) return;
-  const att = (n.attachments || []).find(a => a.id === attId);
-  if (!att) return;
-  if (!confirm(`Удалить файл «${att.name}»?`)) return;
-
-  n.attachments = n.attachments.filter(a => a.id !== attId);
-  n.updated = Date.now();
-  persistLocally();
-  renderAttachments(n);
-  toast("Файл удалён");
-
-  if (currentToken && att.path) {
-    YD.deleteRemoteFile(currentToken, att.path);
+  if (!n) return;
+  const b = n.blocks.find(x => x.id === blockId);
+  if (b && b.type === "todo") {
+    b.checked = !b.checked;
+    updateSelected({ blocks: n.blocks });
+    renderBlocks(n);
   }
+};
+
+window.__inotesHandleClick = function(blockId, event) {
+  slashTargetBlockId = blockId;
+  const rect = event.target.getBoundingClientRect();
+  const menu = $("slashMenu");
+  menu.style.top = `${rect.bottom + window.scrollY + 6}px`;
+  menu.style.left = `${Math.min(rect.left, window.innerWidth - 300)}px`;
+  menu.hidden = false;
 };
 
 // -------------------------------------------------------------
-// Загрузка файлов на Яндекс Диск (до 200 МБ)
+// Слэш-меню (AppFlowy Slash Command)
+// -------------------------------------------------------------
+function showSlashMenu(blockId, targetEl) {
+  slashTargetBlockId = blockId;
+  const rect = targetEl.getBoundingClientRect();
+  const menu = $("slashMenu");
+  menu.style.top = `${rect.bottom + window.scrollY + 6}px`;
+  menu.style.left = `${Math.min(rect.left, window.innerWidth - 300)}px`;
+  menu.hidden = false;
+}
+
+function hideSlashMenu() {
+  $("slashMenu").hidden = true;
+  slashTargetBlockId = null;
+}
+
+$("slashMenu").addEventListener("click", e => {
+  const item = e.target.closest(".af-slash-item");
+  if (!item) return;
+  const type = item.dataset.type;
+  hideSlashMenu();
+
+  if (type === "scan") {
+    scanDocumentWithCamera();
+  } else if (type === "photo" || type === "file") {
+    $("filePicker").click();
+  } else if (type === "audio") {
+    toggleVoiceRecording();
+  } else {
+    const n = notes.find(x => x.id === selectedId);
+    if (!n) return;
+
+    if (slashTargetBlockId) {
+      const b = n.blocks.find(x => x.id === slashTargetBlockId);
+      if (b && b.content === "/") {
+        b.type = type;
+        b.content = "";
+        updateSelected({ blocks: n.blocks });
+        renderBlocks(n);
+        setTimeout(() => {
+          const el = document.querySelector(`[data-block-id="${b.id}"] [contenteditable=true]`);
+          if (el) el.focus();
+        }, 50);
+        return;
+      }
+    }
+    insertBlockBelow(slashTargetBlockId, type);
+  }
+});
+
+document.addEventListener("click", e => {
+  if (!e.target.closest("#slashMenu") && !e.target.closest(".af-block-handle") && !e.target.closest("#quickAddBtn")) {
+    hideSlashMenu();
+  }
+});
+
+$("quickAddBtn").onclick = (e) => {
+  const rect = e.target.getBoundingClientRect();
+  const menu = $("slashMenu");
+  menu.style.top = `${Math.max(10, rect.top - 380)}px`;
+  menu.style.left = `${Math.min(rect.left, window.innerWidth - 300)}px`;
+  menu.hidden = false;
+};
+
+$("addBlockTrigger").onclick = () => {
+  const n = notes.find(x => x.id === selectedId);
+  if (!n) return;
+  const lastBlock = n.blocks[n.blocks.length - 1];
+  insertBlockBelow(lastBlock?.id, "text");
+};
+
+// -------------------------------------------------------------
+// Загрузка файлов до 200 МБ в поток блоков
 // -------------------------------------------------------------
 async function handleFilesUpload(files) {
   if (!files || files.length === 0) return;
@@ -646,7 +747,6 @@ async function handleFilesUpload(files) {
   }
   const n = notes.find(x => x.id === selectedId);
   if (!n || n.trashed) return;
-  if (!n.attachments) n.attachments = [];
 
   const progressWrap = $("uploadProgressWrap");
   const fileNameEl = $("uploadFileName");
@@ -666,13 +766,22 @@ async function handleFilesUpload(files) {
         fillEl.style.width = `${progress.percent}%`;
         percentEl.textContent = `${progress.percent}% (${formatBytes(progress.loaded)} / ${formatBytes(progress.total)})`;
       });
-      n.attachments.push(att);
-      n.updated = Date.now();
-      persistLocally();
-      renderAttachments(n);
+
+      // Добавляем блок прямо в текущий документ
+      const blockType = att.category === "photo" ? "image" : (att.category === "audio" ? "audio" : "file");
+      n.blocks.push({
+        id: uid(),
+        type: blockType,
+        url: att.url,
+        name: att.name,
+        size: att.size,
+        path: att.path
+      });
+
+      updateSelected({ blocks: n.blocks });
+      renderBlocks(n);
       toast(`Загружено: ${file.name}`);
     } catch (err) {
-      console.error(err);
       alert(`Ошибка при загрузке ${file.name}: ${err.message}`);
     }
   }
@@ -703,6 +812,7 @@ async function processScannedPhoto(file) {
       canvas.height = img.height;
       ctx.drawImage(img, 0, 0);
 
+      // Улучшение контраста документа
       const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const data = imgData.data;
       for (let i = 0; i < data.length; i += 4) {
@@ -769,6 +879,83 @@ async function toggleVoiceRecording() {
   }
 }
 
+// Полноэкранный просмотр фото (Лайтбокс)
+window.__inotesOpenLightbox = function(url) {
+  $("lightboxImg").src = url;
+  $("lightboxModal").hidden = false;
+};
+$("closeLightbox").onclick = () => {
+  $("lightboxModal").hidden = true;
+  $("lightboxImg").src = "";
+};
+
+// -------------------------------------------------------------
+// Корзина и восстановление
+// -------------------------------------------------------------
+function moveToTrash() {
+  if (!selectedId) return;
+  const n = notes.find(x => x.id === selectedId);
+  if (!n) return;
+
+  n.trashed = true;
+  n.trashedAt = Date.now();
+  persistLocally();
+
+  const next = notes.find(x => !x.trashed);
+  selectedId = next?.id || null;
+  if (selectedId) openNote(selectedId);
+  else closeEditor();
+  toast("Страница перемещена в корзину");
+}
+
+function restoreFromTrash() {
+  if (!selectedId) return;
+  const n = notes.find(x => x.id === selectedId);
+  if (!n) return;
+
+  n.trashed = false;
+  delete n.trashedAt;
+  n.updated = Date.now();
+  persistLocally();
+
+  activeFolder = "all";
+  renderDocList();
+  openNote(n.id);
+  toast("Страница восстановлена!");
+}
+
+function deletePermanently() {
+  if (!selectedId) return;
+  if (!confirm("Удалить страницу навсегда? Это действие нельзя отменить.")) return;
+
+  const id = selectedId;
+  deletedIds.add(id);
+  notes = notes.filter(x => x.id !== id);
+  selectedId = notes[0]?.id || null;
+  persistLocally();
+
+  if (selectedId) openNote(selectedId);
+  else closeEditor();
+  toast("Страница удалена навсегда");
+}
+
+function emptyTrash() {
+  const count = notes.filter(n => n.trashed).length;
+  if (!count) return;
+  if (!confirm(`Очистить корзину (${count} документов)? Все они будут удалены навсегда.`)) return;
+
+  for (const n of notes.filter(n => n.trashed)) {
+    deletedIds.add(n.id);
+  }
+
+  notes = notes.filter(n => !n.trashed);
+  selectedId = notes[0]?.id || null;
+  persistLocally();
+  if (selectedId) openNote(selectedId);
+  else closeEditor();
+  toast("Корзина очищена");
+}
+
 // -------------------------------------------------------------
 // Авторизация Яндекс OAuth
 // -------------------------------------------------------------
@@ -782,8 +969,6 @@ async function checkAuthAndInit() {
       if (currentUser) {
         setSyncStatus("online");
         $("accountLabel").textContent = currentUser.display_name || currentUser.default_email;
-        $("authHeading").textContent = "Яндекс Диск подключён";
-        $("authSubtitle").textContent = "Синхронизация работает автоматически";
         $("authLoggedOut").hidden = true;
         $("authLoggedIn").hidden = false;
         $("userName").textContent = currentUser.display_name || "Пользователь";
@@ -817,23 +1002,34 @@ async function checkAuthAndInit() {
 // Слушатели событий
 // -------------------------------------------------------------
 $("notesList").addEventListener("click", e => {
-  const row = e.target.closest(".note-item-row");
-  if (row) openNote(row.dataset.id);
+  const card = e.target.closest(".af-doc-card");
+  if (card) openNote(card.dataset.id);
 });
 
-$("newNoteBtn").onclick = $("editorNewBtn").onclick = createNote;
+$("newNoteBtn").onclick = createNote;
 $("backBtn").onclick = closeEditor;
 $("menuBtn").onclick = () => $("sidebar").classList.toggle("open");
 
 $("noteTitle").addEventListener("input", () => updateSelected({ title: $("noteTitle").value }));
-$("noteBody").addEventListener("input", () => updateSelected({ body: $("noteBody").innerHTML }));
+
+// Смена иконки документа
+const EMOJIS = ["📝", "📊", "💡", "💼", "🎯", "🚀", "📁", "⭐️", "🔑", "📌", "🎨", "💻"];
+$("pageIconBtn").onclick = () => {
+  const n = notes.find(x => x.id === selectedId);
+  if (!n) return;
+  const currIdx = EMOJIS.indexOf(n.icon || "📝");
+  const nextEmoji = EMOJIS[(currIdx + 1) % EMOJIS.length];
+  n.icon = nextEmoji;
+  $("pageIconBtn").textContent = nextEmoji;
+  updateSelected({ icon: nextEmoji });
+  renderDocList();
+};
 
 $("pinBtn").onclick = () => {
   const n = notes.find(x => x.id === selectedId);
   if (n) {
     updateSelected({ pinned: !n.pinned });
     $("pinBtn").classList.toggle("active", !!n.pinned);
-    $("pinIcon").textContent = n.pinned ? "★" : "⌑";
   }
 };
 
@@ -841,13 +1037,6 @@ $("deleteBtn").onclick = moveToTrash;
 $("restoreBtn").onclick = restoreFromTrash;
 $("permDeleteBtn").onclick = deletePermanently;
 $("emptyTrashBtn").onclick = emptyTrash;
-
-$("checklistBtn").onclick = () => {
-  const el = $("noteBody");
-  el.focus();
-  document.execCommand("insertHTML", false, '<div><input type="checkbox"> Новая задача</div>');
-  updateSelected({ body: el.innerHTML });
-};
 
 $("attachBtn").onclick = () => $("filePicker").click();
 $("filePicker").onchange = e => {
@@ -865,7 +1054,14 @@ $("cameraPicker").onchange = e => {
 
 $("micBtn").onclick = toggleVoiceRecording;
 
-// Drag & drop
+$("todoBtn").onclick = () => {
+  const n = notes.find(x => x.id === selectedId);
+  if (!n) return;
+  const lastBlock = n.blocks[n.blocks.length - 1];
+  insertBlockBelow(lastBlock?.id, "todo");
+};
+
+// Drag & drop файлов
 const editorPane = $("editorPane");
 editorPane.addEventListener("dragover", e => { e.preventDefault(); });
 editorPane.addEventListener("drop", e => {
@@ -885,14 +1081,14 @@ document.addEventListener("paste", e => {
 
 $("searchInput").oninput = e => {
   searchTerm = e.target.value;
-  renderList();
+  renderDocList();
 };
 
 $("folderList").onclick = e => {
   const b = e.target.closest("[data-folder]");
   if (!b) return;
   activeFolder = b.dataset.folder;
-  renderList();
+  renderDocList();
   if (innerWidth <= 768) $("sidebar").classList.remove("open");
 };
 
@@ -922,12 +1118,12 @@ $("manualSyncBtn").onclick = async () => {
 };
 
 $("signOutBtn").onclick = () => {
-  if (confirm("Выйти из аккаунта Яндекс? Заметки останутся на этом устройстве.")) {
+  if (confirm("Выйти из аккаунта Яндекс? Документы останутся на этом устройстве.")) {
     YD.removeStoredToken();
     currentToken = null;
     currentUser = null;
     setSyncStatus("offline");
-    $("accountLabel").textContent = "Войти через Яндекс";
+    $("accountLabel").textContent = "Яндекс Диск";
     $("authLoggedOut").hidden = false;
     $("authLoggedIn").hidden = true;
     $("authModal").hidden = true;
@@ -935,31 +1131,33 @@ $("signOutBtn").onclick = () => {
   }
 };
 
+// Приветственный документ в стиле AppFlowy
 if (!notes.length) {
   notes = [{
     id: uid(),
-    title: "График и документы ✦",
-    body: `Добро пожаловать в iNotes!
-
-Приложение оформлено в точности как стандартные Заметки iPhone.
-
-Попробуйте:
-• Прикрепить фотографии или документы (📎)
-• Отсканировать документ с камеры (📷)
-• Записать голосовую заметку (🎙️)
-• Добавить список задач (✓☷)`,
+    title: "Добро пожаловать в iNotes Flow ✦",
+    icon: "🚀",
     folder: "personal",
     pinned: true,
     trashed: false,
-    attachments: [],
-    updated: Date.now()
+    updated: Date.now(),
+    blocks: [
+      { id: uid(), type: "callout", content: "Это блочный редактор нового поколения в стиле AppFlowy и Notion с синхронизацией через ваш Яндекс Диск." },
+      { id: uid(), type: "h1", content: "Возможности блоков" },
+      { id: uid(), type: "text", content: "Вы можете добавлять блоки в любое место документа — наберите слэш «/» или нажмите кнопку «＋»." },
+      { id: uid(), type: "todo", content: "Попробовать скан документа с камеры (📷)", checked: false },
+      { id: uid(), type: "todo", content: "Прикрепить фото, видео или файл до 200 МБ (📎)", checked: false },
+      { id: uid(), type: "todo", content: "Записать голосовую заметку (🎙️)", checked: false },
+      { id: uid(), type: "divider" },
+      { id: uid(), type: "text", content: "Все ваши данные и файлы автоматически сохраняются в вашем личном Яндекс Диске и доступны на Mac, Android и iPhone." }
+    ]
   }];
   localStorage.setItem(STORE, JSON.stringify(notes));
 }
 
 const initialNote = notes.find(n => !n.trashed);
 if (initialNote) selectedId = initialNote.id;
-renderList();
+renderDocList();
 if (selectedId) openNote(selectedId);
 
 checkAuthAndInit();
